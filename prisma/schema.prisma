@@ -1,0 +1,78 @@
+// KalshiPredict data model
+// Auth is handled with a custom JWT-cookie scheme (jose + bcryptjs), so no
+// Account/Session/VerificationToken tables are needed.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum PredictionStatus {
+  RUNNING
+  COMPLETE
+  ERROR
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  name         String?
+  role         Role         @default(USER)
+  createdAt    DateTime     @default(now())
+  predictions  Prediction[]
+}
+
+model Prediction {
+  id             String           @id @default(cuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform       String           @default("kalshi")
+  eventTicker    String
+  eventTitle     String
+  category       String?
+  // SEO-friendly public slug, assigned once a prediction COMPLETEs.
+  // e.g. "will-zelensky-and-putin-speak-prediction"
+  slug           String?          @unique
+  status         PredictionStatus @default(RUNNING)
+  progress       Int              @default(0)
+  stage          String           @default("queued")
+  // Kalshi event/markets/candles captured at run time
+  kalshiSnapshot Json?
+  // Structured AI result (see src/lib/ai/schema.ts)
+  result         Json?
+  modelUsed      String?
+  error          String?
+  createdAt      DateTime         @default(now())
+  completedAt    DateTime?
+
+  @@index([userId, createdAt])
+  @@index([eventTicker])
+}
+
+// Reserved for the future Plans page + admin dashboard.
+model Plan {
+  id           String   @id @default(cuid())
+  name         String
+  priceCents   Int      @default(0)
+  interval     String   @default("month")
+  features     Json?
+  monthlyQuota Int?
+  createdAt    DateTime @default(now())
+}
+
+// Reserved for the future admin dashboard (site settings).
+model SiteSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
