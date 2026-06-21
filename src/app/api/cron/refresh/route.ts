@@ -10,10 +10,12 @@ export const dynamic = "force-dynamic";
 /**
  * Refresh the cached snapshot of live Kalshi events. Meant to be called on a
  * schedule (Vercel Cron or an external scheduler) so page loads read the cached
- * snapshot instead of hitting Kalshi on every request. Protected by CRON_SECRET.
+ * snapshot instead of hitting Kalshi on every request. Protected by a
+ * `?token=<CRON_SECRET>` query parameter.
  */
 async function handle(req: Request) {
-  if (!isAuthorizedCron(req.headers.get("authorization"))) {
+  const { searchParams } = new URL(req.url);
+  if (!isAuthorizedCron(searchParams.get("token"))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

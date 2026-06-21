@@ -69,12 +69,12 @@ export function hasDatabase(): boolean {
 }
 
 /**
- * Verify a cron request's bearer token against CRON_SECRET. Returns false when
- * the secret is unset in production (fail closed). In dev, an unset secret
+ * Verify a cron request's `?token=` value against CRON_SECRET. Returns false
+ * when the secret is unset in production (fail closed). In dev, an unset secret
  * allows the request so the endpoint can be exercised locally.
  */
-export function isAuthorizedCron(authHeader: string | null): boolean {
+export function isAuthorizedCron(token: string | null): boolean {
   const secret = parsed.CRON_SECRET;
   if (!secret) return !IS_PROD;
-  return authHeader === `Bearer ${secret}`;
+  return token === secret;
 }

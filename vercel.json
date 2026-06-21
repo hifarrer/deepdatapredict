@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
-      "path": "/api/cron/refresh",
+      "path": "/api/cron/refresh?token=REPLACE_WITH_CRON_SECRET",
       "schedule": "*/10 * * * *"
     }
   ]
