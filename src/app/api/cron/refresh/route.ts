@@ -57,6 +57,5 @@ async function handle(req: Request) {
   }
 }
 
-// Vercel Cron issues GET requests; allow POST for manual/external triggers too.
+// Vercel Cron (and external schedulers) trigger this via GET.
 export const GET = handle;
-export const POST = handle;
