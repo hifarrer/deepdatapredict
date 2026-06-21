@@ -1,11 +1,14 @@
 import Link from "next/link";
-import { TrendingUp, LogOut } from "lucide-react";
+import { TrendingUp, LogOut, Coins, Shield } from "lucide-react";
 import { getSession } from "@/lib/session";
+import { getCredits } from "@/lib/credits";
 import { logoutAction } from "@/app/(auth)/actions";
 import { Button } from "@/components/ui/button";
 
 export async function SiteHeader() {
   const session = await getSession();
+  const isAdmin = session?.role === "ADMIN";
+  const credits = session ? await getCredits(session.sub) : null;
 
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/80 backdrop-blur">
@@ -37,12 +40,28 @@ export async function SiteHeader() {
             <Link href="/plans" className="hover:text-slate-900">
               Plans
             </Link>
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="flex items-center gap-1 text-emerald-700 hover:text-emerald-900"
+              >
+                <Shield className="h-4 w-4" />
+                Admin
+              </Link>
+            )}
           </nav>
         </div>
 
         <div className="flex items-center gap-3">
           {session ? (
             <>
+              <span
+                className="hidden items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 sm:inline-flex"
+                title="Prediction credits remaining this month"
+              >
+                <Coins className="h-3.5 w-3.5" />
+                {credits} {credits === 1 ? "credit" : "credits"}
+              </span>
               <span className="hidden text-sm text-slate-500 sm:inline">
                 {session.name || session.email}
               </span>

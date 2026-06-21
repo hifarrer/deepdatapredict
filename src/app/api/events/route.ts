@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getCachedLiveEvents } from "@/lib/kalshi/cache";
 import { getEventsByStatus } from "@/lib/kalshi/client";
 import { orderCategories } from "@/lib/kalshi/categories";
+import { getSiteSettings, limitForCategory } from "@/lib/settings";
 import type { EventSummary } from "@/lib/kalshi/types";
 
 export const runtime = "nodejs";
@@ -14,7 +15,9 @@ export async function GET(req: Request) {
     const category = searchParams.get("category");
     const q = searchParams.get("q")?.toLowerCase().trim();
     const status = searchParams.get("status") ?? "open";
-    const limit = Math.min(Number(searchParams.get("limit") ?? 20) || 20, 100);
+    // Events are capped per category (admin-configurable), with a global
+    // default for unconfigured categories and an overall ceiling on "All".
+    const settings = await getSiteSettings();
 
     const all =
       status === "open"
@@ -63,8 +66,26 @@ export async function GET(req: Request) {
       (a, b) => Number(Boolean(b.freePredictionId)) - Number(Boolean(a.freePredictionId))
     );
 
+    // Cap per category. For a specific category, cap to that category's limit.
+    // For "All", cap each category independently then apply the overall ceiling
+    // so high-volume categories can't crowd out low-volume ones.
+    let capped: EventSummary[];
+    if (category && category !== "All") {
+      capped = withFree.slice(0, limitForCategory(settings, category));
+    } else {
+      const counts = new Map<string, number>();
+      capped = [];
+      for (const e of withFree) {
+        const used = counts.get(e.category) ?? 0;
+        if (used >= limitForCategory(settings, e.category)) continue;
+        counts.set(e.category, used + 1);
+        capped.push(e);
+      }
+      capped = capped.slice(0, settings.maxLiveEvents);
+    }
+
     return NextResponse.json({
-      events: withFree.slice(0, limit),
+      events: capped,
       categories,
       total: withFree.length,
       fetchedAt: new Date().toISOString(),

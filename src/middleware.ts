@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/jwt";
 
-const PROTECTED = ["/dashboard", "/history"];
+const PROTECTED = ["/dashboard", "/history", "/admin"];
 const AUTH_PAGES = ["/login", "/register"];
 
 export async function middleware(req: NextRequest) {
@@ -12,12 +12,21 @@ export async function middleware(req: NextRequest) {
   const isProtected = PROTECTED.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`)
   );
+  const isAdmin = pathname === "/admin" || pathname.startsWith("/admin/");
   const isAuthPage = AUTH_PAGES.includes(pathname);
 
   if (isProtected && !session) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
+    return NextResponse.redirect(url);
+  }
+
+  // Admin area requires the ADMIN role; send non-admins to their dashboard.
+  if (isAdmin && session && session.role !== "ADMIN") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/dashboard";
+    url.search = "";
     return NextResponse.redirect(url);
   }
 
@@ -32,5 +41,11 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/history/:path*", "/login", "/register"],
+  matcher: [
+    "/dashboard/:path*",
+    "/history/:path*",
+    "/admin/:path*",
+    "/login",
+    "/register",
+  ],
 };

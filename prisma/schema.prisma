@@ -23,13 +23,19 @@ enum PredictionStatus {
 }
 
 model User {
-  id           String       @id @default(cuid())
-  email        String       @unique
-  passwordHash String
-  name         String?
-  role         Role         @default(USER)
-  createdAt    DateTime     @default(now())
-  predictions  Prediction[]
+  id             String       @id @default(cuid())
+  email          String       @unique
+  passwordHash   String
+  name           String?
+  role           Role         @default(USER)
+  // Prediction credits. Each generated prediction costs 1 credit.
+  credits        Int          @default(3)
+  // When credits were last reset to the plan quota (lazy monthly reset).
+  creditsResetAt DateTime?
+  planId         String?
+  plan           Plan?        @relation(fields: [planId], references: [id])
+  createdAt      DateTime     @default(now())
+  predictions    Prediction[]
 }
 
 model Prediction {
@@ -59,15 +65,26 @@ model Prediction {
   @@index([eventTicker])
 }
 
-// Reserved for the future Plans page + admin dashboard.
+// Subscription plans, managed from the admin dashboard.
 model Plan {
-  id           String   @id @default(cuid())
-  name         String
-  priceCents   Int      @default(0)
-  interval     String   @default("month")
-  features     Json?
-  monthlyQuota Int?
-  createdAt    DateTime @default(now())
+  id                   String   @id @default(cuid())
+  // Stable identifier (free / basic / pro) — used for lookups and seeding.
+  slug                 String   @unique
+  name                 String
+  priceCents           Int      @default(0)
+  yearlyPriceCents     Int?
+  interval             String   @default("month")
+  // Array of feature strings shown on the plans page.
+  features             Json?
+  // Credits granted to a user on this plan each month.
+  monthlyQuota         Int?
+  // Stripe price ids for future Stripe integration.
+  stripeMonthlyPriceId String?
+  stripeYearlyPriceId  String?
+  isActive             Boolean  @default(true)
+  sortOrder            Int      @default(0)
+  createdAt            DateTime @default(now())
+  users                User[]
 }
 
 // Reserved for the future admin dashboard (site settings).
@@ -75,4 +92,15 @@ model SiteSetting {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+// Cached snapshot of live Kalshi events, refreshed by the cron endpoint
+// (/api/cron/refresh). A single "live" row holds the full normalized list so
+// page loads read the cache instead of hitting Kalshi on every request.
+model EventSnapshot {
+  id         String   @id @default("live") // singleton row
+  events     Json // EventSummary[]
+  categories Json // ordered category names
+  count      Int      @default(0)
+  fetchedAt  DateTime @default(now())
 }

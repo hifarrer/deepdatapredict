@@ -137,15 +137,22 @@ interface GetEventsResponse {
   cursor?: string;
 }
 
-async function fetchEvents(status: string, limit: number): Promise<EventSummary[]> {
+async function fetchEvents(
+  status: string,
+  limit: number,
+  cursor?: string
+): Promise<{ events: EventSummary[]; cursor?: string }> {
   const data = await kalshiFetch<GetEventsResponse>("/events", {
     status,
     limit,
     with_nested_markets: true,
+    cursor,
   });
-  return (data.events ?? [])
+  const events = (data.events ?? [])
     .map(normalizeEvent)
     .filter((e) => e.markets.length > 0);
+  // Kalshi returns an empty-string cursor when there are no more pages.
+  return { events, cursor: data.cursor || undefined };
 }
 
 /**
@@ -153,9 +160,29 @@ async function fetchEvents(status: string, limit: number): Promise<EventSummary[
  * have at least one tradeable market, sorted by trading volume (≈ "trending").
  */
 export async function getLiveEvents(limit = 200): Promise<EventSummary[]> {
-  const events = (await fetchEvents("open", limit)).filter((e) => e.isLive);
-  events.sort((a, b) => b.totalVolume - a.totalVolume);
-  return events;
+  const { events } = await fetchEvents("open", limit);
+  const live = events.filter((e) => e.isLive);
+  live.sort((a, b) => b.totalVolume - a.totalVolume);
+  return live;
+}
+
+/**
+ * Fetch *all* live events by walking Kalshi's cursor pagination (200/page).
+ * Kalshi caps `limit` at 200 per request, so deep coverage of low-volume
+ * categories requires paging. Used by the cron refresh endpoint.
+ */
+export async function getAllLiveEvents(maxPages = 10): Promise<EventSummary[]> {
+  const all: EventSummary[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < maxPages; page++) {
+    const res = await fetchEvents("open", 200, cursor);
+    all.push(...res.events);
+    cursor = res.cursor;
+    if (!cursor) break;
+  }
+  const live = all.filter((e) => e.isLive);
+  live.sort((a, b) => b.totalVolume - a.totalVolume);
+  return live;
 }
 
 /** Fetch events by an arbitrary status (e.g. "settled", "closed") for History. */
@@ -163,7 +190,7 @@ export async function getEventsByStatus(
   status: string,
   limit = 60
 ): Promise<EventSummary[]> {
-  const events = await fetchEvents(status, limit);
+  const { events } = await fetchEvents(status, limit);
   events.sort((a, b) => b.totalVolume - a.totalVolume);
   return events;
 }

@@ -34,7 +34,8 @@ export function DashboardClient() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const key = `/api/events?limit=24&category=${encodeURIComponent(
+  // No explicit limit: the server applies the admin-configured maxLiveEvents.
+  const key = `/api/events?category=${encodeURIComponent(
     category
   )}&q=${encodeURIComponent(debounced)}`;
 

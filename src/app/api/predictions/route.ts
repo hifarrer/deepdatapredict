@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
+import { ensureMonthlyCredits, chargeOneCredit } from "@/lib/credits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +26,14 @@ export async function POST(req: Request) {
   const eventTicker = String(body.eventTicker ?? "").trim();
   if (!eventTicker) {
     return NextResponse.json({ error: "eventTicker is required" }, { status: 400 });
+  }
+
+  // Each prediction costs 1 credit. Refill to the plan quota at the start of
+  // the month, then atomically charge — blocking the run if the user is empty.
+  await ensureMonthlyCredits(session.sub);
+  const charged = await chargeOneCredit(session.sub);
+  if (!charged) {
+    return NextResponse.json({ error: "out_of_credits" }, { status: 402 });
   }
 
   const prediction = await prisma.prediction.create({

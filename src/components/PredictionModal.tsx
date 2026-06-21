@@ -70,6 +70,13 @@ export function PredictionModal({
         setPhase("error");
         return;
       }
+      if (createRes.status === 402) {
+        setError(
+          "You're out of prediction credits for this month. Upgrade your plan to keep going."
+        );
+        setPhase("error");
+        return;
+      }
       if (!createRes.ok) throw new Error("Could not start the prediction.");
       const { id } = await createRes.json();
 
@@ -193,6 +200,10 @@ export function PredictionModal({
             {error?.toLowerCase().includes("sign in") ? (
               <Button asChild>
                 <Link href={`/login?next=/dashboard`}>Sign in</Link>
+              </Button>
+            ) : error?.toLowerCase().includes("credit") ? (
+              <Button asChild>
+                <Link href="/plans">Upgrade your plan</Link>
               </Button>
             ) : (
               <Button variant="outline" onClick={restart}>

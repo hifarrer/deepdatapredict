@@ -26,10 +26,25 @@ export async function requireUser(): Promise<SessionPayload> {
   return session;
 }
 
+/** Throws unless the current session belongs to an ADMIN — use in admin actions/pages. */
+export async function requireAdmin(): Promise<SessionPayload> {
+  const session = await getSession();
+  if (!session) throw new UnauthorizedError();
+  if (session.role !== "ADMIN") throw new ForbiddenError();
+  return session;
+}
+
 export class UnauthorizedError extends Error {
   constructor() {
     super("Unauthorized");
     this.name = "UnauthorizedError";
+  }
+}
+
+export class ForbiddenError extends Error {
+  constructor() {
+    super("Forbidden");
+    this.name = "ForbiddenError";
   }
 }
 
