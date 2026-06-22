@@ -8,6 +8,7 @@ import {
   orderLeagues,
   leagueForEvent,
   sportForEvent,
+  orderByMatch,
 } from "@/lib/kalshi/sports";
 import { getSiteSettings, limitForCategory, limitForSport } from "@/lib/settings";
 import type { EventSummary } from "@/lib/kalshi/types";
@@ -141,18 +142,27 @@ export async function GET(req: Request) {
       (a, b) => Number(Boolean(b.freePredictionId)) - Number(Boolean(a.freePredictionId))
     );
 
+    // Group every match's events together with the main match event first, so a
+    // match's prop markets (Goalscorer, Total Goals, Spread…) never appear ahead
+    // of the match itself. Under the Sports tab (incl. a selected sport/league),
+    // also order the matches by kickoff — live/soonest first — the way Kalshi's
+    // league pages do.
+    const ordered = orderByMatch(withFree, {
+      byKickoff: category === "Sports",
+    });
+
     // Cap events. Non-sports categories are capped to their per-category limit.
     // Sports are capped two ways: each sport to its per-sport limit, and the
     // Sports category as a whole to its category limit. A specific sport view
     // is capped only to that sport's limit. "All" applies the overall ceiling.
     let capped: EventSummary[];
     if (category === "Sports" && sub) {
-      capped = withFree.slice(0, limitForSport(settings, sub));
+      capped = ordered.slice(0, limitForSport(settings, sub));
     } else {
       const catCounts = new Map<string, number>();
       const sportCapCounts = new Map<string, number>();
       capped = [];
-      for (const e of withFree) {
+      for (const e of ordered) {
         if (e.category === "Sports") {
           const sport = sportOf(e);
           if ((sportCapCounts.get(sport) ?? 0) >= limitForSport(settings, sport)) continue;
@@ -174,7 +184,7 @@ export async function GET(req: Request) {
     // URL-imported events are never dropped by the caps: if one passed the
     // active filters but got squeezed out above, surface it at the front.
     const cappedTickers = new Set(capped.map((e) => e.eventTicker));
-    const droppedManual = withFree.filter(
+    const droppedManual = ordered.filter(
       (e) => e.manual && !cappedTickers.has(e.eventTicker)
     );
     if (droppedManual.length > 0) {
@@ -188,7 +198,7 @@ export async function GET(req: Request) {
       sportCounts,
       leagues,
       leagueCounts,
-      total: withFree.length,
+      total: ordered.length,
       fetchedAt: new Date().toISOString(),
     });
   } catch (err) {

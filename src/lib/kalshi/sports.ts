@@ -1,3 +1,5 @@
+import type { EventSummary } from "./types";
+
 // Classify a Kalshi "Sports" event into a specific sport. Kalshi encodes the
 // league in the series ticker (e.g. KXNBA*, KXNFL*, KXEPL*), so we match on the
 // ticker first and fall back to title keywords. Anything unmatched is "Other".
@@ -276,4 +278,149 @@ export function orderLeagues(counts: Map<string, number>): string[] {
     const diff = (counts.get(b) ?? 0) - (counts.get(a) ?? 0);
     return diff !== 0 ? diff : a.localeCompare(b);
   });
+}
+
+// ---- Match grouping (one tier below league) ----
+//
+// Kalshi splits a single match into many events: the match itself ("Norway vs
+// Senegal") plus a prop event per market type ("Norway vs Senegal: Goalscorer",
+// "…: Total Goals", "…: Spread"). The props all share the matchup as a title
+// prefix, with the prop name after a colon, so the matchup text is a reliable
+// grouping key and the colon's absence marks the main match event.
+
+/**
+ * Grouping key for a Sports event: the matchup ("team a vs team b"), i.e. the
+ * title with any trailing ": <prop>" suffix removed and normalized. Every event
+ * for one match shares this key; tournament-wide futures ("World Cup: Top
+ * Scorer") group under their own prefix, which is harmless.
+ */
+export function matchGroupKey(title: string): string {
+  return title.split(":")[0].trim().toLowerCase();
+}
+
+/**
+ * True when a Sports event is the match itself rather than one of its prop
+ * sub-events. Kalshi names props "<Matchup>: <Prop>", so a title with no colon
+ * is the main match.
+ */
+export function isMainMatchEvent(title: string): boolean {
+  return !title.includes(":");
+}
+
+const MONTHS: Record<string, number> = {
+  JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+  JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+};
+
+/**
+ * Kickoff day (UTC midnight, ms) parsed from a dated game ticker, or null when
+ * the ticker carries no date. Kalshi encodes a match's date in the ticker code
+ * after the series prefix: "KXWCGAME-26JUN22FRAIRQ" → 22 Jun 2026. The market
+ * open/close times are useless for ordering (they span the whole tournament), so
+ * this ticker date is the only reliable kickoff signal. Tournament-wide futures
+ * ("KXWCWINGROUP-26HOST", "KXWCGROUPBOTTOM-26C") have no month/day and return
+ * null. Day granularity is all the ticker carries — no kickoff time of day.
+ */
+export function matchDateFromTicker(eventTicker: string | undefined): number | null {
+  if (!eventTicker) return null;
+  const dash = eventTicker.indexOf("-");
+  const code = (dash === -1 ? eventTicker : eventTicker.slice(dash + 1)).toUpperCase();
+  const m = /^(\d{2})([A-Z]{3})(\d{2})/.exec(code);
+  if (!m) return null;
+  const month = MONTHS[m[2]];
+  if (month === undefined) return null;
+  const ts = Date.UTC(2000 + Number(m[1]), month, Number(m[3]));
+  return Number.isNaN(ts) ? null : ts;
+}
+
+/**
+ * Re-order events so each match's events sit together with the main match event
+ * first and its prop sub-events (Goalscorer, Total Goals, Spread, …) after it,
+ * the way Kalshi's league pages group them. Only Sports events are grouped;
+ * everything else stays a singleton at its original position.
+ *
+ * Cross-group order: with `byKickoff`, today's and upcoming matches lead, by
+ * kickoff date (today first, then later days) — the way Kalshi's league pages
+ * read. Tournament-wide futures (group winners, top scorer, …) follow, then
+ * already-played matches sink to the bottom. Otherwise the incoming order is
+ * preserved, with each match's events pulled together at the position of its
+ * strongest member.
+ */
+export function orderByMatch(
+  events: EventSummary[],
+  { byKickoff = false }: { byKickoff?: boolean } = {}
+): EventSummary[] {
+  const groups = new Map<string, EventSummary[]>();
+  const firstIndex = new Map<string, number>();
+  events.forEach((e, i) => {
+    // Non-sports events are never merged: key them by their own ticker so each
+    // forms a singleton group and keeps its place.
+    const key =
+      e.category === "Sports" ? `m:${matchGroupKey(e.title)}` : `e:${e.eventTicker}`;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      firstIndex.set(key, i);
+    }
+    groups.get(key)!.push(e);
+  });
+
+  // Within a match: the main event first, then props by volume (most-traded
+  // prop next), so the actual match never sits below its own sub-markets.
+  for (const list of groups.values()) {
+    list.sort((a, b) => {
+      const am = isMainMatchEvent(a.title) ? 0 : 1;
+      const bm = isMainMatchEvent(b.title) ? 0 : 1;
+      if (am !== bm) return am - bm;
+      return b.totalVolume - a.totalVolume;
+    });
+  }
+
+  // Per match: its kickoff day (from the ticker — shared by every event in the
+  // group) and combined volume.
+  const dateByKey = new Map<string, number | null>();
+  const volByKey = new Map<string, number>();
+  for (const [key, list] of groups) {
+    let date: number | null = null;
+    let vol = 0;
+    for (const e of list) {
+      vol += e.totalVolume;
+      const d = matchDateFromTicker(e.eventTicker);
+      if (d !== null && (date === null || d < date)) date = d;
+    }
+    dateByKey.set(key, date);
+    volByKey.set(key, vol);
+  }
+
+  // Day boundary for "today": a match earlier today is still live/today, not past.
+  const nowDate = new Date();
+  const startOfToday = Date.UTC(
+    nowDate.getUTCFullYear(),
+    nowDate.getUTCMonth(),
+    nowDate.getUTCDate()
+  );
+
+  // Bucket: 0 = today/upcoming dated match, 1 = undated tournament future,
+  // 2 = already-played match. Lower buckets lead.
+  const bucketOf = (date: number | null) =>
+    date === null ? 1 : date >= startOfToday ? 0 : 2;
+
+  const keys = Array.from(groups.keys());
+  keys.sort((a, b) => {
+    if (byKickoff) {
+      const da = dateByKey.get(a) ?? null;
+      const db = dateByKey.get(b) ?? null;
+      const ba = bucketOf(da);
+      const bb = bucketOf(db);
+      if (ba !== bb) return ba - bb;
+      // Upcoming matches by date ascending (today, then later days); past matches
+      // most-recent first; futures by volume. Same day/bucket breaks on volume.
+      if (ba === 0 && da !== db) return da! - db!;
+      if (ba === 2 && da !== db) return db! - da!;
+      const dv = volByKey.get(b)! - volByKey.get(a)!;
+      if (dv !== 0) return dv;
+    }
+    return firstIndex.get(a)! - firstIndex.get(b)!;
+  });
+
+  return keys.flatMap((k) => groups.get(k)!);
 }
