@@ -8,7 +8,7 @@ import {
   sleep,
 } from "@/lib/kalshi/client";
 import { orderCategories } from "@/lib/kalshi/categories";
-import { prioritySeriesRank } from "@/lib/kalshi/sports";
+import { prioritySeriesRank, isWorldCupSeries } from "@/lib/kalshi/sports";
 import {
   getSiteSettings,
   getManualEventTickers,
@@ -55,10 +55,21 @@ async function handle(req: Request) {
     const kept = new Map<string, EventSummary>();
     const catCount = new Map<string, number>();
     const sportCount = new Map<string, number>();
+    // Only capped (non-World-Cup) events count against the overall ceiling, so
+    // the uncapped World Cup import never crowds the other categories out.
+    let cappedCount = 0;
 
     function tryAdd(e: EventSummary): boolean {
       if (!e.isLive || kept.has(e.eventTicker)) return false;
-      if (kept.size >= settings.maxLiveEvents) return false;
+
+      // World Cup is imported in full: it bypasses the category/sport caps and
+      // the overall ceiling, and doesn't consume any other league's budget.
+      if (e.category === "Sports" && isWorldCupSeries(e.seriesTicker, e.title)) {
+        kept.set(e.eventTicker, e);
+        return true;
+      }
+
+      if (cappedCount >= settings.maxLiveEvents) return false;
       if ((catCount.get(e.category) ?? 0) >= limitForCategory(settings, e.category)) {
         return false;
       }
@@ -67,6 +78,7 @@ async function handle(req: Request) {
         return false;
       }
       kept.set(e.eventTicker, e);
+      cappedCount++;
       catCount.set(e.category, (catCount.get(e.category) ?? 0) + 1);
       if (sport) sportCount.set(sport, (sportCount.get(sport) ?? 0) + 1);
       return true;
@@ -77,11 +89,21 @@ async function handle(req: Request) {
     let sweptSeries = 0;
     try {
       const series = await getSeriesByCategory("Sports");
-      const prioritized = series
-        .map((s) => ({ ticker: s.ticker, rank: prioritySeriesRank(s.ticker, s.title) }))
-        .filter((s) => s.rank >= 0)
+      const ranked = series
+        .map((s) => ({
+          ticker: s.ticker,
+          isWorldCup: isWorldCupSeries(s.ticker, s.title),
+          rank: prioritySeriesRank(s.ticker, s.title),
+        }))
+        .filter((s) => s.rank >= 0);
+      // World Cup series are swept in full (uncapped); the other priority leagues
+      // share the bounded sweep budget so the rest of the refresh stays balanced.
+      const worldCup = ranked.filter((s) => s.isWorldCup);
+      const others = ranked
+        .filter((s) => !s.isWorldCup)
         .sort((a, b) => a.rank - b.rank)
         .slice(0, SWEEP_SERIES_LIMIT);
+      const prioritized = [...worldCup, ...others];
       for (const s of prioritized) {
         const evs = await getLiveEventsBySeries(s.ticker);
         for (const e of evs) tryAdd(e);
