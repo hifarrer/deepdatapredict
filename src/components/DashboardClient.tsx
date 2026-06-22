@@ -29,12 +29,17 @@ const fetcher = async (url: string): Promise<EventsResponse> => {
   return data;
 };
 
+// Events are rendered 3 per row, so paginate in multiples of 3 to keep rows
+// full. Showing everything at once can be hundreds of cards under "All".
+const PAGE_SIZE = 66;
+
 export function DashboardClient() {
   const [category, setCategory] = useState("All");
   const [subCategory, setSubCategory] = useState("All");
   const [league, setLeague] = useState("All");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
@@ -74,6 +79,11 @@ export function DashboardClient() {
     { refreshInterval: 45_000, keepPreviousData: true, revalidateOnFocus: false }
   );
 
+  // Reset pagination whenever the active filter/search changes.
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [key]);
+
   const events = data?.events ?? [];
   const categories = data?.categories ?? [];
   const sports = data?.sports ?? [];
@@ -109,10 +119,24 @@ export function DashboardClient() {
           isSports ? "xl:grid-cols-3" : "lg:grid-cols-3"
         }`}
       >
-        {events.map((e) => (
+        {events.slice(0, visibleCount).map((e) => (
           <EventCard key={e.eventTicker} event={e} />
         ))}
       </div>
+
+      {events.length > visibleCount && (
+        <div className="flex flex-col items-center gap-2 pt-6">
+          <Button
+            variant="outline"
+            onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+          >
+            Show more events
+          </Button>
+          <p className="text-xs text-slate-400">
+            Showing {visibleCount} of {events.length}
+          </p>
+        </div>
+      )}
     </>
   );
 
