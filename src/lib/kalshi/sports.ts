@@ -47,6 +47,38 @@ const TITLE_RULES: Array<{ sport: string; keywords: string[] }> = [
   { sport: "Tennis", keywords: ["tennis"] },
 ];
 
+// Kalshi runs several unrelated tournaments under "World Cup" branding that
+// collide on the obvious tokens, so they're excluded from the FIFA soccer check:
+//  - Esports World Cup: KXEWC* tickers / "esports" titles
+//  - Cricket T20 World Cup: *T20WORLDCUP* tickers
+//  - West Coast Conference (college basketball): collides on the KXWCC* prefix
+const NON_SOCCER_WC_TICKERS = new Set(["KXWCCREG"]);
+
+/**
+ * True for Kalshi FIFA (soccer) World Cup series. Kalshi's World Cup series ride
+ * the KXWC* / *WORLDCUP* / CLUBWC / PLAYWC ticker families (or carry a "World
+ * Cup" title) rather than the generic league tokens, so they need their own
+ * check — with same-name non-soccer tournaments filtered out first.
+ */
+export function isWorldCupSeries(ticker: string | undefined, title?: string): boolean {
+  const t = (ticker ?? "").toUpperCase();
+  const l = (title ?? "").toLowerCase();
+
+  if (NON_SOCCER_WC_TICKERS.has(t)) return false;
+  if (t.startsWith("KXEWC") || l.includes("esports")) return false;
+  if (t.includes("T20WORLDCUP") || l.includes("t20 world cup")) return false;
+
+  return (
+    t.startsWith("KXWC") ||
+    t.includes("WORLDCUP") ||
+    t.includes("WORLDSOCCERCUP") ||
+    t.includes("CLUBWC") ||
+    t.includes("PLAYWC") ||
+    l.includes("world cup") ||
+    l.includes("world soccer cup")
+  );
+}
+
 /**
  * Returns the sport for a Sports-category event, or undefined for non-sports
  * categories. Never returns undefined for a Sports event — falls back to "Other".
@@ -57,6 +89,11 @@ export function sportForEvent(
   title: string | undefined
 ): string | undefined {
   if (category !== "Sports") return undefined;
+
+  // World Cup series (KXWC*, "World Cup" titles) don't match the soccer league
+  // tokens below, so classify them as Soccer up front; leagueForEvent then
+  // resolves the "World Cup" league for them.
+  if (isWorldCupSeries(seriesTicker, title)) return "Soccer";
 
   const ticker = (seriesTicker ?? "").toUpperCase();
   for (const { sport, tokens } of TICKER_RULES) {
@@ -222,8 +259,11 @@ const PRIORITY_LEAGUE_TOKENS = [
  * not a priority series (skip). Live "game" series outrank season-long futures
  * within the same league, and earlier tokens (soccer) outrank later ones.
  */
-export function prioritySeriesRank(ticker: string): number {
+export function prioritySeriesRank(ticker: string, title?: string): number {
   const t = (ticker ?? "").toUpperCase();
+  // World Cup is the priority — its series ride the KXWC* family rather than the
+  // WORLDCUP/FIFA tokens below, so rank them top explicitly.
+  if (isWorldCupSeries(ticker, title)) return 0;
   const idx = PRIORITY_LEAGUE_TOKENS.findIndex((tok) => t.includes(tok));
   if (idx === -1) return -1;
   const isGame = /GAME|ADVANCE|SPREAD|TOTAL|MATCH/.test(t) ? 0 : 1;

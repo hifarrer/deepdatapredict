@@ -78,7 +78,7 @@ async function handle(req: Request) {
     try {
       const series = await getSeriesByCategory("Sports");
       const prioritized = series
-        .map((s) => ({ ticker: s.ticker, rank: prioritySeriesRank(s.ticker) }))
+        .map((s) => ({ ticker: s.ticker, rank: prioritySeriesRank(s.ticker, s.title) }))
         .filter((s) => s.rank >= 0)
         .sort((a, b) => a.rank - b.rank)
         .slice(0, SWEEP_SERIES_LIMIT);
