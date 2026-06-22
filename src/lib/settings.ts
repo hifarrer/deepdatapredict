@@ -14,11 +14,15 @@ export interface SiteSettings {
 }
 
 export const DEFAULT_SETTINGS: SiteSettings = {
-  maxLiveEvents: 300,
+  // Overall ceiling sized to fit the balanced per-category caps (Sports alone
+  // can be several hundred), so the cron isn't cut short before Sports fills.
+  maxLiveEvents: 1500,
   defaultCategoryLimit: 20,
   categoryLimits: {},
-  defaultSportLimit: 10,
-  sportLimits: {},
+  defaultSportLimit: 25,
+  // Soccer runs high so the live World Cup / major leagues come through in force.
+  // (Overridden by any per-sport limits saved in the admin settings.)
+  sportLimits: { Soccer: 200 },
 };
 
 function posInt(v: unknown, fallback: number): number {

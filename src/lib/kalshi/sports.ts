@@ -92,8 +92,10 @@ export function orderSports(sports: Iterable<string>): string[] {
 // a broad token like "LIGA" can't pin a single league, so it's left out and such
 // events fall back to a cleaned-up ticker label instead of being mislabeled.
 const LEAGUE_RULES: Array<{ sport: string; league: string; tokens: string[] }> = [
-  // Soccer
-  { sport: "Soccer", league: "World Cup", tokens: ["WORLDCUP", "WCHOST", "FIFAWC", "WORLDSOCCERCUP"] },
+  // Soccer. World Cup first so its broad ticker family (KXWC*, KXFIFA*) wins
+  // over the other soccer leagues. "WC"/"FIFA" are safe here because these rules
+  // only apply to events already classified as Soccer.
+  { sport: "Soccer", league: "World Cup", tokens: ["WORLDCUP", "WORLDSOCCERCUP", "WCHOST", "FIFAWC", "FIFA", "WC"] },
   { sport: "Soccer", league: "Premier League", tokens: ["EPL", "PREMIERLEAGUE"] },
   { sport: "Soccer", league: "Champions League", tokens: ["UCL", "CHAMPIONSLEAGUE"] },
   { sport: "Soccer", league: "La Liga", tokens: ["LALIGA"] },
@@ -130,6 +132,19 @@ const LEAGUE_RULES: Array<{ sport: string; league: string; tokens: string[] }> =
   { sport: "Racing", league: "IndyCar", tokens: ["INDYCAR"] },
   // Cricket
   { sport: "Cricket", league: "IPL", tokens: ["IPL"] },
+];
+
+// Title-keyword fallback for leagues whose ticker doesn't carry a known token
+// (e.g. World Cup prop markets like "World Soccer Cup: Hattricks"). Checked after
+// ticker rules; keeps the long tail of related markets grouped under one league.
+const LEAGUE_TITLE_RULES: Array<{ sport: string; league: string; keywords: string[] }> = [
+  { sport: "Soccer", league: "World Cup", keywords: ["world cup", "world soccer cup"] },
+  { sport: "Soccer", league: "Premier League", keywords: ["premier league"] },
+  { sport: "Soccer", league: "Champions League", keywords: ["champions league"] },
+  { sport: "Soccer", league: "La Liga", keywords: ["la liga"] },
+  { sport: "Soccer", league: "Serie A", keywords: ["serie a"] },
+  { sport: "Soccer", league: "Bundesliga", keywords: ["bundesliga"] },
+  { sport: "Soccer", league: "MLS", keywords: ["mls cup", "major league soccer"] },
 ];
 
 // Trailing market-type suffixes Kalshi appends to a series ticker that aren't
@@ -172,7 +187,8 @@ export function prettyLeagueFromTicker(seriesTicker: string | undefined): string
  */
 export function leagueForEvent(
   sport: string | undefined,
-  seriesTicker: string | undefined
+  seriesTicker: string | undefined,
+  title?: string
 ): string | undefined {
   if (!sport) return undefined;
 
@@ -182,7 +198,36 @@ export function leagueForEvent(
     if (tokens.some((t) => ticker.includes(t))) return league;
   }
 
+  const lowerTitle = (title ?? "").toLowerCase();
+  for (const { sport: s, league, keywords } of LEAGUE_TITLE_RULES) {
+    if (s !== sport) continue;
+    if (keywords.some((k) => lowerTitle.includes(k))) return league;
+  }
+
   return prettyLeagueFromTicker(seriesTicker);
+}
+
+// League tokens the cron's targeted sweep pulls in full by series, so marquee
+// leagues are complete regardless of where they fall in Kalshi's global feed.
+// Soccer is listed first so it wins the capped sweep budget (the live World Cup
+// is the priority); other majors follow.
+const PRIORITY_LEAGUE_TOKENS = [
+  "WORLDCUP", "FIFA", "UEFA", "UCL", "EPL", "PREMIERLEAGUE", "LALIGA",
+  "SERIEA", "BUNDES", "MLS", "NWSL", // soccer
+  "NBA", "WNBA", "NFL", "MLB", "NHL", // other majors
+];
+
+/**
+ * Rank a series ticker for the targeted sweep: lower = higher priority, -1 =
+ * not a priority series (skip). Live "game" series outrank season-long futures
+ * within the same league, and earlier tokens (soccer) outrank later ones.
+ */
+export function prioritySeriesRank(ticker: string): number {
+  const t = (ticker ?? "").toUpperCase();
+  const idx = PRIORITY_LEAGUE_TOKENS.findIndex((tok) => t.includes(tok));
+  if (idx === -1) return -1;
+  const isGame = /GAME|ADVANCE|SPREAD|TOTAL|MATCH/.test(t) ? 0 : 1;
+  return idx * 2 + isGame;
 }
 
 /** Order leagues by live-event count (desc), ties broken alphabetically. */

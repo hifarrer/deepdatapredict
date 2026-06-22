@@ -7,9 +7,12 @@ import type {
   RawCandle,
   RawKalshiEvent,
   RawKalshiMarket,
+  RawKalshiSeries,
 } from "./types";
 
 const DEFAULT_TIMEOUT = 20_000;
+
+export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function kalshiFetch<T>(
   path: string,
@@ -22,22 +25,41 @@ async function kalshiFetch<T>(
       if (v !== undefined) url.searchParams.set(k, String(v));
     }
   }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url.toString(), {
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Kalshi ${path} → ${res.status}: ${body.slice(0, 300)}`);
+
+  // Kalshi rate-limits bursty paging with 429s; retry those (and transient 5xx)
+  // with a short exponential backoff before giving up.
+  const maxAttempts = 4;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url.toString(), {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      if (res.status === 429 || res.status >= 500) {
+        const retryAfter = Number(res.headers.get("retry-after"));
+        const backoff = Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : 500 * 2 ** attempt;
+        lastErr = new Error(`Kalshi ${path} → ${res.status} (attempt ${attempt + 1})`);
+        if (attempt < maxAttempts - 1) {
+          await sleep(backoff);
+          continue;
+        }
+      }
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`Kalshi ${path} → ${res.status}: ${body.slice(0, 300)}`);
+      }
+      return (await res.json()) as T;
+    } finally {
+      clearTimeout(timer);
     }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timer);
   }
+  throw lastErr instanceof Error ? lastErr : new Error(`Kalshi ${path} failed`);
 }
 
 // ---- price normalization helpers ----
@@ -126,7 +148,7 @@ export function normalizeEvent(e: RawKalshiEvent): EventSummary {
     subTitle: e.sub_title,
     category,
     subCategory: sport,
-    league: leagueForEvent(sport, e.series_ticker),
+    league: leagueForEvent(sport, e.series_ticker, title),
     mutuallyExclusive: Boolean(e.mutually_exclusive),
     markets,
     totalVolume: markets.reduce((s, m) => s + m.volume, 0),
@@ -199,6 +221,62 @@ export async function getEventsByStatus(
   const { events } = await fetchEvents(status, limit);
   events.sort((a, b) => b.totalVolume - a.totalVolume);
   return events;
+}
+
+/**
+ * One page of open events plus the next cursor. Thin wrapper used by the cron's
+ * balanced paging loop so it can apply storage caps as it walks the feed.
+ */
+export async function pageOpenEvents(
+  cursor?: string,
+  limit = 200
+): Promise<{ events: EventSummary[]; cursor?: string }> {
+  return fetchEvents("open", limit, cursor);
+}
+
+interface GetSeriesResponse {
+  series?: RawKalshiSeries[];
+}
+
+/**
+ * List all series in a category (e.g. "Sports"). Kalshi returns the full set in
+ * one response, so this is a single cheap request used to discover league series
+ * tickers for the targeted sports sweep.
+ */
+export async function getSeriesByCategory(
+  category: string
+): Promise<RawKalshiSeries[]> {
+  const data = await kalshiFetch<GetSeriesResponse>("/series", { category });
+  return data.series ?? [];
+}
+
+/**
+ * All live events for a single series (e.g. a soccer league), paged. Used by the
+ * targeted sweep to guarantee a league is fully represented regardless of where
+ * its events fall in the global feed order.
+ */
+export async function getLiveEventsBySeries(
+  seriesTicker: string,
+  maxPages = 4
+): Promise<EventSummary[]> {
+  const all: EventSummary[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < maxPages; page++) {
+    const data = await kalshiFetch<GetEventsResponse>("/events", {
+      status: "open",
+      series_ticker: seriesTicker,
+      with_nested_markets: true,
+      limit: 200,
+      cursor,
+    });
+    const events = (data.events ?? [])
+      .map(normalizeEvent)
+      .filter((e) => e.markets.length > 0 && e.isLive);
+    all.push(...events);
+    cursor = data.cursor || undefined;
+    if (!cursor) break;
+  }
+  return all;
 }
 
 interface GetEventResponse {

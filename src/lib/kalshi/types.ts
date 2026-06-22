@@ -50,6 +50,14 @@ export interface RawKalshiEvent {
   [key: string]: unknown;
 }
 
+export interface RawKalshiSeries {
+  ticker: string;
+  title?: string;
+  category?: string;
+  tags?: string[];
+  [key: string]: unknown;
+}
+
 type Num = number | string;
 
 export interface RawCandle {

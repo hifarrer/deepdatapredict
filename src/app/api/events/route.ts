@@ -42,8 +42,10 @@ export async function GET(req: Request) {
     // these fields existed): fall back to deriving them from the series ticker.
     const sportOf = (e: EventSummary) =>
       e.subCategory ?? sportForEvent(e.category, e.seriesTicker, e.title) ?? "Other";
+    // Recompute league from the (evolving) heuristic rather than trusting the
+    // stored value, so rule improvements take effect without a cron re-run.
     const leagueOf = (e: EventSummary) =>
-      e.league ?? leagueForEvent(sportOf(e), e.seriesTicker) ?? "Other";
+      leagueForEvent(sportOf(e), e.seriesTicker, e.title) ?? "Other";
 
     // Sports present in the data, for the sub-filter chips under the Sports tab.
     const sports = orderSports(
