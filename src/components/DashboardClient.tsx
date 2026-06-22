@@ -6,6 +6,7 @@ import { RefreshCw, Search, Loader2 } from "lucide-react";
 import type { EventSummary } from "@/lib/kalshi/types";
 import { EventCard } from "@/components/EventCard";
 import { CategoryTabs } from "@/components/CategoryTabs";
+import { PAST_EVENTS_CATEGORY } from "@/lib/kalshi/categories";
 import { SportLeagueSidebar } from "@/components/SportLeagueSidebar";
 import { ImportUrlModal } from "@/components/ImportUrlModal";
 import { Input } from "@/components/ui/input";
@@ -34,7 +35,11 @@ const fetcher = async (url: string): Promise<EventsResponse> => {
 // full. Showing everything at once can be hundreds of cards under "All".
 const PAGE_SIZE = 66;
 
-export function DashboardClient() {
+export function DashboardClient({
+  authenticated = true,
+}: {
+  authenticated?: boolean;
+}) {
   const [category, setCategory] = useState("All");
   const [subCategory, setSubCategory] = useState("All");
   const [league, setLeague] = useState("All");
@@ -92,6 +97,7 @@ export function DashboardClient() {
   const leagues = data?.leagues ?? [];
   const leagueCounts = data?.leagueCounts ?? {};
   const isSports = category === "Sports";
+  const isPast = category === PAST_EVENTS_CATEGORY;
 
   // Event grid + its loading/empty/error states. The grid is a touch narrower
   // under Sports because the sidebar takes a column on large screens.
@@ -121,7 +127,12 @@ export function DashboardClient() {
         }`}
       >
         {events.slice(0, visibleCount).map((e) => (
-          <EventCard key={e.eventTicker} event={e} />
+          <EventCard
+            key={e.eventTicker}
+            event={e}
+            readOnly={isPast}
+            authenticated={authenticated}
+          />
         ))}
       </div>
 
@@ -151,7 +162,7 @@ export function DashboardClient() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <ImportUrlModal onImported={() => mutate()} />
+          {authenticated && <ImportUrlModal onImported={() => mutate()} />}
           <Button
             variant="outline"
             size="sm"

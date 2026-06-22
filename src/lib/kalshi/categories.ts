@@ -2,6 +2,14 @@
 // Tabs are still built from whatever categories actually appear in the data;
 // this only controls ordering and styling.
 
+/**
+ * Synthetic category for events that have ended / been determined (no open
+ * markets). These are bucketed out of the live list and shown view-only in
+ * their own tab. The API appends this to the tab list only when such events
+ * exist; it is never part of CATEGORY_ORDER.
+ */
+export const PAST_EVENTS_CATEGORY = "Past Events";
+
 export const CATEGORY_ORDER = [
   "Politics",
   "Elections",
@@ -36,6 +44,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   Health: "#e11d48",
   Companies: "#475569",
   Entertainment: "#9333ea",
+  [PAST_EVENTS_CATEGORY]: "#64748b",
   Other: "#64748b",
 };
 

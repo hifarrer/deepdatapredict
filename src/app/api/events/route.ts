@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCachedLiveEvents } from "@/lib/kalshi/cache";
 import { getEventsByStatus } from "@/lib/kalshi/client";
-import { orderCategories } from "@/lib/kalshi/categories";
+import { orderCategories, PAST_EVENTS_CATEGORY } from "@/lib/kalshi/categories";
 import {
   orderSports,
   orderLeagues,
@@ -36,7 +36,18 @@ export async function GET(req: Request) {
       status === "open"
         ? await getCachedLiveEvents()
         : await getEventsByStatus(status, 80);
-    const categories = orderCategories(all.map((e) => e.category));
+
+    // An event is "determined" once no market is open/tradeable (isLive=false).
+    // These are pulled out of the live list and surfaced only under a synthetic
+    // "Past Events" tab; the normal categories (and "All") show live events only.
+    const isDetermined = (e: EventSummary) => !e.isLive;
+    const liveEvents = all.filter((e) => !isDetermined(e));
+    const pastEvents = all.filter(isDetermined);
+    const isPastTab = category === PAST_EVENTS_CATEGORY;
+
+    // Tabs are built from the live set; append "Past Events" last when any exist.
+    const categories = orderCategories(liveEvents.map((e) => e.category));
+    if (pastEvents.length > 0) categories.push(PAST_EVENTS_CATEGORY);
 
     // Resolve sport/league even on a stale snapshot (events normalized before
     // these fields existed): fall back to deriving them from the series ticker.
@@ -49,7 +60,7 @@ export async function GET(req: Request) {
 
     // Sports present in the data, for the sub-filter chips under the Sports tab.
     const sports = orderSports(
-      all.filter((e) => e.category === "Sports").map(sportOf)
+      liveEvents.filter((e) => e.category === "Sports").map(sportOf)
     );
     const matchesSearch = (e: EventSummary) =>
       !q ||
@@ -59,8 +70,8 @@ export async function GET(req: Request) {
 
     // Base set: category + search applied, but NOT the sport/league sub-filters,
     // so the sidebar counts reflect everything available (not just the slice shown).
-    let base = all;
-    if (category && category !== "All") {
+    let base = isPastTab ? pastEvents : liveEvents;
+    if (!isPastTab && category && category !== "All") {
       base = base.filter((e) => e.category === category);
     }
     base = base.filter(matchesSearch);

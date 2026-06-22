@@ -33,9 +33,12 @@ function OutcomeRow({ market }: { market: Market }) {
 export function EventCard({
   event,
   readOnly = false,
+  authenticated = true,
 }: {
   event: EventSummary;
   readOnly?: boolean;
+  /** Passed to the prediction trigger; anonymous users are prompted to sign in. */
+  authenticated?: boolean;
 }) {
   const color = categoryColor(event.category);
   const [expanded, setExpanded] = useState(false);
@@ -115,7 +118,7 @@ export function EventCard({
             Closed
           </span>
         ) : (
-          <PredictionModal event={event} />
+          <PredictionModal event={event} authenticated={authenticated} />
         )}
       </div>
     </div>

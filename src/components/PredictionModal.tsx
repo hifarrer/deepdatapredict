@@ -17,14 +17,17 @@ import { Progress } from "@/components/ui/progress";
 import { PredictionResultView } from "@/components/PredictionResultView";
 import { cn } from "@/lib/utils";
 
-type Phase = "idle" | "running" | "result" | "error";
+type Phase = "idle" | "running" | "result" | "error" | "auth";
 
 export function PredictionModal({
   event,
   triggerClassName,
+  authenticated = true,
 }: {
   event: EventSummary;
   triggerClassName?: string;
+  /** When false, the trigger prompts the user to sign in instead of running. */
+  authenticated?: boolean;
 }) {
   const freeId = event.freePredictionId ?? null;
   const [open, setOpen] = useState(false);
@@ -137,7 +140,14 @@ export function PredictionModal({
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
-    if (next && !startedRef.current) {
+    if (!next) return;
+    // Anonymous visitors can browse events but must sign in to view or
+    // generate predictions — show the gate instead of starting the run.
+    if (!authenticated) {
+      setPhase("auth");
+      return;
+    }
+    if (!startedRef.current) {
       startedRef.current = true;
       if (freeId) void viewFree(freeId);
       else void run();
@@ -175,6 +185,32 @@ export function PredictionModal({
           <DialogTitle className="leading-snug">{event.title}</DialogTitle>
           <p className="text-sm text-slate-500">AI prediction · {event.category}</p>
         </DialogHeader>
+
+        {phase === "auth" && (
+          <div className="space-y-5 py-6 text-center">
+            <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+              <Sparkles className="h-6 w-6" />
+            </span>
+            <div className="space-y-1">
+              <p className="text-base font-semibold text-slate-900">
+                {freeId ? "View this AI prediction" : "Generate an AI prediction"}
+              </p>
+              <p className="mx-auto max-w-sm text-sm text-slate-500">
+                Log in or create a free account to{" "}
+                {freeId ? "view" : "generate"} AI predictions for live Kalshi
+                events.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3">
+              <Button asChild>
+                <Link href="/register?next=/dashboard">Create free account</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/login?next=/dashboard">Log in</Link>
+              </Button>
+            </div>
+          </div>
+        )}
 
         {phase === "running" && (
           <div className="space-y-6 py-8">

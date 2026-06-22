@@ -116,11 +116,20 @@ export function ImportUrlModal({ onImported }: { onImported?: () => void }) {
 
         {phase === "found" && event && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
-              Added to your events — generate a prediction below.
-            </div>
-            <EventCard event={event} />
+            {event.isLive ? (
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                Added to your events — generate a prediction below.
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                <AlertCircle className="h-4 w-4 shrink-0 translate-y-0.5" />
+                This event has already ended or been determined. It&apos;s been
+                added under &ldquo;Past Events&rdquo; and can be viewed but not
+                predicted.
+              </div>
+            )}
+            <EventCard event={event} readOnly={!event.isLive} />
             <button
               type="button"
               onClick={reset}
