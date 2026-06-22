@@ -27,6 +27,33 @@ export function PredictionResultView({
   const implied = pickMarket?.kalshiImpliedProbability ?? null;
   const candles = snapshot?.candles?.[pick.ticker] ?? [];
 
+  // Build the outcome table rows. When a snapshot is available, show *every*
+  // outcome with its Kalshi price and overlay the AI numbers for the ones that
+  // were deep-analyzed. Older predictions without a snapshot fall back to just
+  // the analyzed markets.
+  const analyzedByTicker = new Map(result.marketsAnalyzed.map((m) => [m.ticker, m]));
+  const outcomeRows = snapshot?.event?.markets
+    ? [...snapshot.event.markets]
+        .sort((a, b) => (b.lastProbability ?? -1) - (a.lastProbability ?? -1))
+        .map((m) => {
+          const ai = analyzedByTicker.get(m.ticker);
+          return {
+            ticker: m.ticker,
+            title: m.title,
+            kalshiImpliedProbability: m.lastProbability,
+            predictedProbability: ai?.predictedProbability ?? null,
+            edge: ai?.edge ?? null,
+          };
+        })
+    : result.marketsAnalyzed.map((m) => ({
+        ticker: m.ticker,
+        title: m.title,
+        kalshiImpliedProbability: m.kalshiImpliedProbability,
+        predictedProbability: m.predictedProbability as number | null,
+        edge: m.edge,
+      }));
+  const hasUnanalyzed = outcomeRows.some((r) => r.predictedProbability == null);
+
   return (
     <div className="space-y-6">
       {/* Disclaimer */}
@@ -103,9 +130,15 @@ export function PredictionResultView({
       )}
 
       {/* Markets analyzed */}
-      {result.marketsAnalyzed.length > 0 && (
+      {outcomeRows.length > 0 && (
         <div className="space-y-2">
           <h4 className="text-sm font-semibold text-slate-900">Outcome probabilities</h4>
+          {hasUnanalyzed && (
+            <p className="text-xs text-slate-500">
+              The AI deep-analyzed the top outcomes by Kalshi price; the rest show
+              the market price only.
+            </p>
+          )}
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full text-sm">
               <thead>
@@ -117,11 +150,15 @@ export function PredictionResultView({
                 </tr>
               </thead>
               <tbody>
-                {result.marketsAnalyzed.map((m) => (
+                {outcomeRows.map((m) => (
                   <tr key={m.ticker} className="border-t border-slate-100">
                     <td className="px-3 py-2 text-slate-700">{m.title}</td>
                     <td className="px-3 py-2 font-semibold text-slate-900">
-                      {formatPct(m.predictedProbability)}
+                      {m.predictedProbability == null ? (
+                        <span className="font-normal text-slate-400">—</span>
+                      ) : (
+                        formatPct(m.predictedProbability)
+                      )}
                     </td>
                     <td className="px-3 py-2 text-slate-600">
                       {formatPct(m.kalshiImpliedProbability)}

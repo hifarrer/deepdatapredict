@@ -15,12 +15,39 @@ import {
   predictionJsonSchema,
 } from "./schema";
 
-// High enough to cover large multi-outcome events (e.g. World Cup ~48
-// countries) so every option reaches the model. Only the price-history
-// (candles) detail is limited to the most-traded markets below.
-const MAX_MARKETS_FOR_MODEL = 100;
-const MAX_MARKETS_WITH_CANDLES = 8;
+// Only the top outcomes by Kalshi implied probability are deep-analyzed. Large
+// multi-outcome events (e.g. "World Cup champion" with 20+ countries) would
+// otherwise cost too much time/tokens to research per outcome and risk
+// truncating the structured-output stage. The remaining outcomes are still
+// passed to the model as compact context (and shown in the UI), just not
+// individually researched.
+const MAX_MARKETS_FOR_MODEL = 5;
+const MAX_MARKETS_WITH_CANDLES = 5;
 const MAX_PAUSE_CONTINUATIONS = 8;
+
+/** Markets that are tradeable and carry a usable Kalshi price. */
+function isAnalyzable(m: Market): boolean {
+  const status = m.status.toLowerCase();
+  const tradeable = status === "open" || status === "active";
+  return tradeable && m.lastProbability != null;
+}
+
+/**
+ * Pick the top outcomes by Kalshi implied probability for deep analysis. The
+ * rest are returned as `others` for compact context only.
+ */
+function selectMarketsForAnalysis(event: EventSummary): {
+  analyzed: Market[];
+  others: Market[];
+} {
+  const ranked = event.markets
+    .filter(isAnalyzable)
+    .sort((a, b) => (b.lastProbability ?? -1) - (a.lastProbability ?? -1));
+  return {
+    analyzed: ranked.slice(0, MAX_MARKETS_FOR_MODEL),
+    others: ranked.slice(MAX_MARKETS_FOR_MODEL),
+  };
+}
 
 function progress(stage: Stage, message?: string, value?: number): PipelineEvent {
   return {
@@ -45,12 +72,14 @@ function marketLine(m: Market): string {
   }/${m.yesAsk?.toFixed(0) ?? "?"}, volume ${m.volume.toLocaleString()}, OI ${m.openInterest.toLocaleString()}, status ${m.status}`;
 }
 
-function buildBrief(event: EventSummary, candles: Record<string, { ts: number; close: number | null }[]>): string {
+function buildBrief(
+  event: EventSummary,
+  analyzed: Market[],
+  others: Market[],
+  candles: Record<string, { ts: number; close: number | null }[]>
+): string {
   const close = event.closeTime;
   const dToClose = daysBetween(close);
-  const markets = [...event.markets]
-    .sort((a, b) => b.volume - a.volume)
-    .slice(0, MAX_MARKETS_FOR_MODEL);
 
   const lines: string[] = [];
   lines.push(`EVENT: ${event.title}`);
@@ -66,11 +95,24 @@ function buildBrief(event: EventSummary, candles: Record<string, { ts: number; c
     }`
   );
   lines.push("");
-  lines.push("MARKETS (Kalshi live prices = market-implied probabilities):");
-  for (const m of markets) lines.push(marketLine(m));
+  lines.push(
+    "MARKETS TO ANALYZE (top outcomes by Kalshi price = market-implied probabilities):"
+  );
+  for (const m of analyzed) lines.push(marketLine(m));
 
-  // Compact candle history for the most-traded markets
-  const withCandles = markets.slice(0, MAX_MARKETS_WITH_CANDLES);
+  if (others.length > 0) {
+    lines.push("");
+    lines.push(
+      "OTHER OUTCOMES (context only — do NOT research or include in marketsAnalyzed):"
+    );
+    for (const m of others) {
+      const implied = m.lastProbability != null ? `${m.lastProbability.toFixed(0)}%` : "n/a";
+      lines.push(`- "${m.title}" — Kalshi ${implied}`);
+    }
+  }
+
+  // Compact candle history for the analyzed markets
+  const withCandles = analyzed.slice(0, MAX_MARKETS_WITH_CANDLES);
   for (const m of withCandles) {
     const series = candles[m.ticker];
     if (!series || series.length === 0) continue;
@@ -86,7 +128,7 @@ function buildBrief(event: EventSummary, candles: Record<string, { ts: number; c
 
 function researchSystemPrompt(todayIso: string): string {
   return `You are a world-class forecaster and analyst for prediction markets. Today is ${todayIso}.
-Your job: rigorously estimate the probability of each outcome in a Kalshi event, then identify the single most likely / best-supported outcome.
+Your job: rigorously estimate the probability of each outcome listed under "MARKETS TO ANALYZE", then identify the single most likely / best-supported one. Any "OTHER OUTCOMES" are provided only as context (e.g. to gauge the residual field in a mutually-exclusive event) — do not research them individually.
 
 Method:
 - Weigh the time remaining until the market closes against how much could still change.
@@ -106,6 +148,7 @@ function structuredSystemPrompt(): string {
   return `You convert a detailed forecasting analysis into a strict JSON prediction object that exactly matches the provided schema.
 Rules:
 - probabilities and confidence are 0-100 numbers.
+- marketsAnalyzed must contain ONLY the markets listed under "MARKETS TO ANALYZE" — never the "OTHER OUTCOMES". topPick must be one of those analyzed markets.
 - topPick is the single outcome you are most confident about; "side" is YES if you expect that market to resolve YES, otherwise NO, and "probability" is the chance the picked side resolves true.
 - For each analyzed market, set kalshiImpliedProbability from the Kalshi data provided, and edge = predictedProbability - kalshiImpliedProbability (null if implied unknown).
 - keyPoints: the decisive factors, each with direction (impact) and relative weight.
@@ -136,11 +179,13 @@ export async function* runPrediction(
     return;
   }
 
+  const { analyzed, others } = selectMarketsForAnalysis(event);
+
   const candles: KalshiSnapshot["candles"] = {};
   if (event.seriesTicker) {
-    const top = [...event.markets].sort((a, b) => b.volume - a.volume).slice(0, MAX_MARKETS_WITH_CANDLES);
+    const withCandles = analyzed.slice(0, MAX_MARKETS_WITH_CANDLES);
     await Promise.all(
-      top.map(async (m) => {
+      withCandles.map(async (m) => {
         candles[m.ticker] = await getCandles(event.seriesTicker!, m.ticker, { days: 90 });
       })
     );
@@ -150,7 +195,7 @@ export async function* runPrediction(
     candles,
     capturedAt: new Date().toISOString(),
   };
-  const brief = buildBrief(event, candles);
+  const brief = buildBrief(event, analyzed, others, candles);
 
   // ---- Stage 2: deep research with web search ----
   yield progress("researching", STAGE_LABEL.researching, STAGE_BASE.researching);
