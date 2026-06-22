@@ -1,8 +1,48 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import type { EventSummary } from "@/lib/kalshi/types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+export type SortKey = "featured" | "closing" | "volume" | "volume24h" | "confidence";
+
+/**
+ * "Market confidence": how lopsided the leading outcome is.
+ * Multi-outcome events → (top probability − second). Single binary market →
+ * distance of the implied complement, i.e. |p − (100 − p)|. Higher = more decided.
+ */
+export function marketConfidence(event: EventSummary): number {
+  const probs = event.markets
+    .map((m) => m.lastProbability ?? m.yesBid ?? m.yesAsk)
+    .filter((p): p is number => p != null);
+  if (probs.length === 0) return -1; // unknown → sorts last
+  if (probs.length === 1) return Math.abs(probs[0] - (100 - probs[0]));
+  const sorted = [...probs].sort((a, b) => b - a);
+  return sorted[0] - sorted[1];
+}
+
+/** Comparator for the chosen sort. "featured" preserves the server order. */
+export function compareEvents(
+  key: SortKey
+): (a: EventSummary, b: EventSummary) => number {
+  switch (key) {
+    case "closing":
+      // Soonest first; events with no close time sort last.
+      return (a, b) =>
+        (a.closeTime ? new Date(a.closeTime).getTime() : Infinity) -
+        (b.closeTime ? new Date(b.closeTime).getTime() : Infinity);
+    case "volume":
+      return (a, b) => b.totalVolume - a.totalVolume;
+    case "volume24h":
+      return (a, b) => b.volume24h - a.volume24h;
+    case "confidence":
+      return (a, b) => marketConfidence(b) - marketConfidence(a);
+    case "featured":
+    default:
+      return () => 0;
+  }
 }
 
 /** Format a USD volume like Kalshi ("$253,893 vol"). */

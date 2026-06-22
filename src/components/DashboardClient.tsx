@@ -9,8 +9,10 @@ import { CategoryTabs } from "@/components/CategoryTabs";
 import { PAST_EVENTS_CATEGORY } from "@/lib/kalshi/categories";
 import { SportLeagueSidebar } from "@/components/SportLeagueSidebar";
 import { ImportUrlModal } from "@/components/ImportUrlModal";
+import { SortMenu } from "@/components/SortMenu";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { compareEvents, type SortKey } from "@/lib/utils";
 
 interface EventsResponse {
   events: EventSummary[];
@@ -45,6 +47,7 @@ export function DashboardClient({
   const [league, setLeague] = useState("All");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
+  const [sort, setSort] = useState<SortKey>("featured");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   useEffect(() => {
@@ -91,6 +94,8 @@ export function DashboardClient({
   }, [key]);
 
   const events = data?.events ?? [];
+  const sortedEvents =
+    sort === "featured" ? events : [...events].sort(compareEvents(sort));
   const categories = data?.categories ?? [];
   const sports = data?.sports ?? [];
   const sportCounts = data?.sportCounts ?? {};
@@ -126,7 +131,7 @@ export function DashboardClient({
           isSports ? "xl:grid-cols-3" : "lg:grid-cols-3"
         }`}
       >
-        {events.slice(0, visibleCount).map((e) => (
+        {sortedEvents.slice(0, visibleCount).map((e) => (
           <EventCard
             key={e.eventTicker}
             event={e}
@@ -136,7 +141,7 @@ export function DashboardClient({
         ))}
       </div>
 
-      {events.length > visibleCount && (
+      {sortedEvents.length > visibleCount && (
         <div className="flex flex-col items-center gap-2 pt-6">
           <Button
             variant="outline"
@@ -145,7 +150,7 @@ export function DashboardClient({
             Show more events
           </Button>
           <p className="text-xs text-slate-400">
-            Showing {visibleCount} of {events.length}
+            Showing {visibleCount} of {sortedEvents.length}
           </p>
         </div>
       )}
@@ -163,6 +168,7 @@ export function DashboardClient({
         </div>
         <div className="flex items-center gap-2">
           {authenticated && <ImportUrlModal onImported={() => mutate()} />}
+          <SortMenu value={sort} onChange={setSort} />
           <Button
             variant="outline"
             size="sm"
