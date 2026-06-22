@@ -37,3 +37,12 @@ export async function getCachedLiveEvents(): Promise<EventSummary[]> {
 export function cacheAgeMs(): number | null {
   return cache ? Date.now() - cache.at : null;
 }
+
+/**
+ * Drop the in-memory micro-cache so the next read reloads from the DB snapshot.
+ * Called after importing an event by URL so it shows up immediately instead of
+ * waiting out the TTL.
+ */
+export function resetLiveCache(): void {
+  cache = null;
+}

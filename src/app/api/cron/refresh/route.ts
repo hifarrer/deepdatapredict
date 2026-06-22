@@ -4,11 +4,17 @@ import {
   pageOpenEvents,
   getSeriesByCategory,
   getLiveEventsBySeries,
+  getEvent,
   sleep,
 } from "@/lib/kalshi/client";
 import { orderCategories } from "@/lib/kalshi/categories";
 import { prioritySeriesRank } from "@/lib/kalshi/sports";
-import { getSiteSettings, limitForCategory, limitForSport } from "@/lib/settings";
+import {
+  getSiteSettings,
+  getManualEventTickers,
+  limitForCategory,
+  limitForSport,
+} from "@/lib/settings";
 import { isAuthorizedCron } from "@/lib/env";
 import type { EventSummary } from "@/lib/kalshi/types";
 
@@ -100,6 +106,29 @@ async function handle(req: Request) {
     }
 
     const events = [...kept.values()].sort((a, b) => b.totalVolume - a.totalVolume);
+
+    // Re-merge URL-imported events so they persist across the rebuilt snapshot.
+    // Best-effort: a ticker that no longer resolves (expired/removed) is skipped.
+    try {
+      const manualTickers = await getManualEventTickers();
+      const present = new Set(events.map((e) => e.eventTicker));
+      for (const ticker of manualTickers) {
+        if (present.has(ticker)) continue;
+        try {
+          const ev = await getEvent(ticker);
+          if (ev) {
+            events.unshift({ ...ev, manual: true });
+            present.add(ticker);
+          }
+        } catch {
+          // Skip this ticker; the rest of the refresh still succeeds.
+        }
+        await sleep(SWEEP_DELAY_MS);
+      }
+    } catch {
+      // No manual list / read failure — the snapshot is still valid without it.
+    }
+
     const categories = orderCategories(events.map((e) => e.category));
 
     // Prisma's JSON input type rejects typed arrays without an index signature;

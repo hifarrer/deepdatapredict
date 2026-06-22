@@ -160,6 +160,16 @@ export async function GET(req: Request) {
       capped = capped.slice(0, settings.maxLiveEvents);
     }
 
+    // URL-imported events are never dropped by the caps: if one passed the
+    // active filters but got squeezed out above, surface it at the front.
+    const cappedTickers = new Set(capped.map((e) => e.eventTicker));
+    const droppedManual = withFree.filter(
+      (e) => e.manual && !cappedTickers.has(e.eventTicker)
+    );
+    if (droppedManual.length > 0) {
+      capped = [...droppedManual, ...capped];
+    }
+
     return NextResponse.json({
       events: capped,
       categories,

@@ -7,6 +7,7 @@ import type { EventSummary } from "@/lib/kalshi/types";
 import { EventCard } from "@/components/EventCard";
 import { CategoryTabs } from "@/components/CategoryTabs";
 import { SportLeagueSidebar } from "@/components/SportLeagueSidebar";
+import { ImportUrlModal } from "@/components/ImportUrlModal";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
@@ -149,15 +150,18 @@ export function DashboardClient() {
             Markets currently open on Kalshi · generate an AI prediction for any of them.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => mutate()}
-          disabled={isValidating}
-        >
-          <RefreshCw className={`h-4 w-4 ${isValidating ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <ImportUrlModal onImported={() => mutate()} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => mutate()}
+            disabled={isValidating}
+          >
+            <RefreshCw className={`h-4 w-4 ${isValidating ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <div className="relative">

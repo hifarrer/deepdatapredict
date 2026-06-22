@@ -126,6 +126,11 @@ export interface EventSummary {
    * exists. When set, the event can be viewed for free without re-generating.
    */
   freePredictionId?: string | null;
+  /**
+   * True when the event was imported by URL rather than pulled by the cron
+   * sweep. Manual events are always included in the list (never dropped by caps).
+   */
+  manual?: boolean;
 }
 
 export interface CandlePoint {

@@ -78,3 +78,26 @@ export async function setSiteSetting(key: string, value: unknown): Promise<void>
     create: { key, value: value as never },
   });
 }
+
+const MANUAL_EVENTS_KEY = "manualEventTickers";
+
+/**
+ * Event tickers users imported by URL. These persist independently of the live
+ * snapshot (which the cron rebuilds from scratch) so the cron can re-merge them
+ * into every refresh — keeping manually-added events in the curated list.
+ */
+export async function getManualEventTickers(): Promise<string[]> {
+  const row = await prisma.siteSetting.findUnique({
+    where: { key: MANUAL_EVENTS_KEY },
+  });
+  const value = row?.value;
+  if (!Array.isArray(value)) return [];
+  return value.filter((t): t is string => typeof t === "string");
+}
+
+/** Add an imported event ticker to the persistent manual list (dedup). */
+export async function addManualEventTicker(ticker: string): Promise<void> {
+  const current = await getManualEventTickers();
+  if (current.includes(ticker)) return;
+  await setSiteSetting(MANUAL_EVENTS_KEY, [ticker, ...current]);
+}
