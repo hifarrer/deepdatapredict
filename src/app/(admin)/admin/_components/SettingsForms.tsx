@@ -15,11 +15,17 @@ export function SiteSettingsForm({
   defaultCategoryLimit,
   categoryLimits,
   categories,
+  defaultSportLimit,
+  sportLimits,
+  sports,
 }: {
   maxLiveEvents: number;
   defaultCategoryLimit: number;
   categoryLimits: Record<string, number>;
   categories: string[];
+  defaultSportLimit: number;
+  sportLimits: Record<string, number>;
+  sports: string[];
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
     updateSiteSettings,
@@ -80,6 +86,43 @@ export function SiteSettingsForm({
                 min={1}
                 placeholder={String(defaultCategoryLimit)}
                 defaultValue={categoryLimits[cat] ?? ""}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-2 border-t border-slate-100 pt-4">
+        <Label className="text-sm text-slate-700">Per-sport limits (within Sports)</Label>
+        <p className="text-xs text-slate-400">
+          Caps each sport inside the Sports category. The total Sports cap above still
+          applies. Blank = use the default below.
+        </p>
+        <div className="max-w-xs space-y-1 pb-1">
+          <Label htmlFor="defaultSportLimit" className="text-xs text-slate-600">
+            Default per-sport limit
+          </Label>
+          <Input
+            id="defaultSportLimit"
+            type="number"
+            name="defaultSportLimit"
+            min={1}
+            defaultValue={defaultSportLimit}
+          />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {sports.map((sport) => (
+            <div key={sport} className="space-y-1">
+              <Label htmlFor={`sport__${sport}`} className="text-xs text-slate-600">
+                {sport}
+              </Label>
+              <Input
+                id={`sport__${sport}`}
+                type="number"
+                name={`sport__${sport}`}
+                min={1}
+                placeholder={String(defaultSportLimit)}
+                defaultValue={sportLimits[sport] ?? ""}
               />
             </div>
           ))}

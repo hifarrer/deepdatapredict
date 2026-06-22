@@ -98,6 +98,13 @@ export interface EventSummary {
   title: string;
   subTitle?: string;
   category: string;
+  /** For Sports events, the specific sport (Football, Basketball, …). */
+  subCategory?: string;
+  /**
+   * For Sports events, the specific league/competition (Premier League, MLS,
+   * World Cup, …), derived from the series ticker.
+   */
+  league?: string;
   mutuallyExclusive: boolean;
   markets: Market[];
   totalVolume: number;

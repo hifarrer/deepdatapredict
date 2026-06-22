@@ -1,4 +1,5 @@
 import { KALSHI_API_BASE } from "@/lib/env";
+import { sportForEvent, leagueForEvent } from "./sports";
 import type {
   CandlePoint,
   EventSummary,
@@ -115,12 +116,17 @@ function soonestClose(markets: Market[]): string | undefined {
 export function normalizeEvent(e: RawKalshiEvent): EventSummary {
   const markets = (e.markets ?? []).map(normalizeMarket);
   const isLive = markets.some((m) => OPEN_STATUSES.has(m.status.toLowerCase()));
+  const title = e.title || e.event_ticker;
+  const category = (e.category && e.category.trim()) || "Other";
+  const sport = sportForEvent(category, e.series_ticker, title);
   return {
     eventTicker: e.event_ticker,
     seriesTicker: e.series_ticker,
-    title: e.title || e.event_ticker,
+    title,
     subTitle: e.sub_title,
-    category: (e.category && e.category.trim()) || "Other",
+    category,
+    subCategory: sport,
+    league: leagueForEvent(sport, e.series_ticker),
     mutuallyExclusive: Boolean(e.mutually_exclusive),
     markets,
     totalVolume: markets.reduce((s, m) => s + m.volume, 0),

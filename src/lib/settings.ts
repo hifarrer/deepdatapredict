@@ -7,20 +7,26 @@ export interface SiteSettings {
   defaultCategoryLimit: number;
   /** Explicit per-category caps, e.g. { Politics: 50, World: 20, Sports: 100 }. */
   categoryLimits: Record<string, number>;
+  /** Per-sport cap (within Sports) used for any sport without its own limit. */
+  defaultSportLimit: number;
+  /** Explicit per-sport caps, e.g. { Basketball: 30, Soccer: 15 }. */
+  sportLimits: Record<string, number>;
 }
 
 export const DEFAULT_SETTINGS: SiteSettings = {
   maxLiveEvents: 300,
   defaultCategoryLimit: 20,
   categoryLimits: {},
+  defaultSportLimit: 10,
+  sportLimits: {},
 };
 
 function posInt(v: unknown, fallback: number): number {
   return typeof v === "number" && v > 0 ? Math.floor(v) : fallback;
 }
 
-/** Coerce a stored JSON value into a clean { category: positiveInt } map. */
-function parseCategoryLimits(raw: unknown): Record<string, number> {
+/** Coerce a stored JSON value into a clean { name: positiveInt } map. */
+function parseLimits(raw: unknown): Record<string, number> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const out: Record<string, number> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
@@ -41,13 +47,23 @@ export async function getSiteSettings(): Promise<SiteSettings> {
       map.get("defaultCategoryLimit"),
       DEFAULT_SETTINGS.defaultCategoryLimit
     ),
-    categoryLimits: parseCategoryLimits(map.get("categoryLimits")),
+    categoryLimits: parseLimits(map.get("categoryLimits")),
+    defaultSportLimit: posInt(
+      map.get("defaultSportLimit"),
+      DEFAULT_SETTINGS.defaultSportLimit
+    ),
+    sportLimits: parseLimits(map.get("sportLimits")),
   };
 }
 
 /** Per-category cap for a category, falling back to the global default. */
 export function limitForCategory(settings: SiteSettings, category: string): number {
   return settings.categoryLimits[category] ?? settings.defaultCategoryLimit;
+}
+
+/** Per-sport cap for a sport, falling back to the global sport default. */
+export function limitForSport(settings: SiteSettings, sport: string): number {
+  return settings.sportLimits[sport] ?? settings.defaultSportLimit;
 }
 
 /** Persist a single setting value (admin only — guard at the call site). */

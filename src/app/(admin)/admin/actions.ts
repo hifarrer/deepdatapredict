@@ -137,18 +137,27 @@ export async function updateSiteSettings(
     return { error: "Default per-category limit must be a positive number." };
   }
 
-  // Collect per-category limits from the `cat__<Category>` fields. Blank or
-  // non-positive entries are dropped so the category falls back to the default.
+  const defaultSportLimit = intOrNull(formData.get("defaultSportLimit"));
+  if (defaultSportLimit === null || defaultSportLimit < 1) {
+    return { error: "Default per-sport limit must be a positive number." };
+  }
+
+  // Collect per-category (`cat__*`) and per-sport (`sport__*`) limits. Blank or
+  // non-positive entries are dropped so the item falls back to its default.
   const categoryLimits: Record<string, number> = {};
+  const sportLimits: Record<string, number> = {};
   for (const [key, value] of formData.entries()) {
-    if (!key.startsWith("cat__")) continue;
     const n = intOrNull(value);
-    if (n !== null && n >= 1) categoryLimits[key.slice("cat__".length)] = n;
+    if (n === null || n < 1) continue;
+    if (key.startsWith("cat__")) categoryLimits[key.slice("cat__".length)] = n;
+    else if (key.startsWith("sport__")) sportLimits[key.slice("sport__".length)] = n;
   }
 
   await setSiteSetting("maxLiveEvents", maxLiveEvents);
   await setSiteSetting("defaultCategoryLimit", defaultCategoryLimit);
   await setSiteSetting("categoryLimits", categoryLimits);
+  await setSiteSetting("defaultSportLimit", defaultSportLimit);
+  await setSiteSetting("sportLimits", sportLimits);
   revalidatePath("/admin/settings");
   return { success: "Settings saved." };
 }

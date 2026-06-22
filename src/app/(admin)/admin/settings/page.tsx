@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getSiteSettings } from "@/lib/settings";
 import { CATEGORY_ORDER, orderCategories } from "@/lib/kalshi/categories";
+import { SPORTS_ORDER, orderSports } from "@/lib/kalshi/sports";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SiteSettingsForm, PasswordForm } from "../_components/SettingsForms";
 
@@ -24,6 +25,10 @@ export default async function AdminSettingsPage() {
     ...snapshotCategories,
     ...Object.keys(settings.categoryLimits),
   ]);
+  const sports = orderSports([
+    ...SPORTS_ORDER,
+    ...Object.keys(settings.sportLimits),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -42,6 +47,9 @@ export default async function AdminSettingsPage() {
             defaultCategoryLimit={settings.defaultCategoryLimit}
             categoryLimits={settings.categoryLimits}
             categories={categories}
+            defaultSportLimit={settings.defaultSportLimit}
+            sportLimits={settings.sportLimits}
+            sports={sports}
           />
         </CardContent>
       </Card>

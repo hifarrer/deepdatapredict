@@ -52,6 +52,11 @@ export function EventCard({
         >
           {event.category}
         </span>
+        {event.category === "Sports" && event.league && event.league !== "Other" && (
+          <span className="truncate text-xs font-medium uppercase tracking-wide text-slate-400">
+            · {event.league}
+          </span>
+        )}
       </div>
 
       <h3 className="line-clamp-2 min-h-[2.75rem] text-base font-semibold text-slate-900">

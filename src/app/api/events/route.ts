@@ -3,7 +3,13 @@ import { prisma } from "@/lib/db";
 import { getCachedLiveEvents } from "@/lib/kalshi/cache";
 import { getEventsByStatus } from "@/lib/kalshi/client";
 import { orderCategories } from "@/lib/kalshi/categories";
-import { getSiteSettings, limitForCategory } from "@/lib/settings";
+import {
+  orderSports,
+  orderLeagues,
+  leagueForEvent,
+  sportForEvent,
+} from "@/lib/kalshi/sports";
+import { getSiteSettings, limitForCategory, limitForSport } from "@/lib/settings";
 import type { EventSummary } from "@/lib/kalshi/types";
 
 export const runtime = "nodejs";
@@ -13,10 +19,17 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const category = searchParams.get("category");
+    const subCategoryParam = searchParams.get("subCategory");
+    const sub =
+      subCategoryParam && subCategoryParam !== "All" ? subCategoryParam : null;
+    const leagueParam = searchParams.get("league");
+    const league =
+      leagueParam && leagueParam !== "All" ? leagueParam : null;
     const q = searchParams.get("q")?.toLowerCase().trim();
     const status = searchParams.get("status") ?? "open";
     // Events are capped per category (admin-configurable), with a global
     // default for unconfigured categories and an overall ceiling on "All".
+    // Sports are further capped per sport (subCategory).
     const settings = await getSiteSettings();
 
     const all =
@@ -25,17 +38,60 @@ export async function GET(req: Request) {
         : await getEventsByStatus(status, 80);
     const categories = orderCategories(all.map((e) => e.category));
 
-    let filtered = all;
+    // Resolve sport/league even on a stale snapshot (events normalized before
+    // these fields existed): fall back to deriving them from the series ticker.
+    const sportOf = (e: EventSummary) =>
+      e.subCategory ?? sportForEvent(e.category, e.seriesTicker, e.title) ?? "Other";
+    const leagueOf = (e: EventSummary) =>
+      e.league ?? leagueForEvent(sportOf(e), e.seriesTicker) ?? "Other";
+
+    // Sports present in the data, for the sub-filter chips under the Sports tab.
+    const sports = orderSports(
+      all.filter((e) => e.category === "Sports").map(sportOf)
+    );
+    const matchesSearch = (e: EventSummary) =>
+      !q ||
+      e.title.toLowerCase().includes(q) ||
+      Boolean(e.subTitle?.toLowerCase().includes(q)) ||
+      e.markets.some((m) => m.title.toLowerCase().includes(q));
+
+    // Base set: category + search applied, but NOT the sport/league sub-filters,
+    // so the sidebar counts reflect everything available (not just the slice shown).
+    let base = all;
     if (category && category !== "All") {
-      filtered = filtered.filter((e) => e.category === category);
+      base = base.filter((e) => e.category === category);
     }
-    if (q) {
-      filtered = filtered.filter(
-        (e) =>
-          e.title.toLowerCase().includes(q) ||
-          e.subTitle?.toLowerCase().includes(q) ||
-          e.markets.some((m) => m.title.toLowerCase().includes(q))
-      );
+    base = base.filter(matchesSearch);
+
+    // Per-sport counts, and (when a sport is selected) per-league counts + order,
+    // for the Sports sidebar. Only meaningful under the Sports category.
+    const sportCounts: Record<string, number> = {};
+    let leagues: string[] = [];
+    const leagueCounts: Record<string, number> = {};
+    if (category === "Sports") {
+      for (const e of base) {
+        const s = sportOf(e);
+        sportCounts[s] = (sportCounts[s] ?? 0) + 1;
+      }
+      if (sub) {
+        const lc = new Map<string, number>();
+        for (const e of base) {
+          if (sportOf(e) !== sub) continue;
+          const l = leagueOf(e);
+          lc.set(l, (lc.get(l) ?? 0) + 1);
+        }
+        leagues = orderLeagues(lc);
+        for (const [k, v] of lc) leagueCounts[k] = v;
+      }
+    }
+
+    // Returned events: apply the sport and league sub-filters on top of the base.
+    let filtered = base;
+    if (category === "Sports" && sub) {
+      filtered = filtered.filter((e) => sportOf(e) === sub);
+    }
+    if (category === "Sports" && sub && league) {
+      filtered = filtered.filter((e) => leagueOf(e) === league);
     }
 
     // A prediction that has already been generated (by anyone) for an event is
@@ -56,8 +112,14 @@ export async function GET(req: Request) {
       }
     }
 
+    // Enrich returned events with the resolved sport/league so clients (event
+    // cards, badges) see the same values used for grouping — including on a
+    // stale snapshot where these fields weren't stored.
     const withFree: EventSummary[] = filtered.map((e) => ({
       ...e,
+      ...(e.category === "Sports"
+        ? { subCategory: sportOf(e), league: leagueOf(e) }
+        : {}),
       freePredictionId: freeByTicker.get(e.eventTicker) ?? null,
     }));
 
@@ -66,20 +128,32 @@ export async function GET(req: Request) {
       (a, b) => Number(Boolean(b.freePredictionId)) - Number(Boolean(a.freePredictionId))
     );
 
-    // Cap per category. For a specific category, cap to that category's limit.
-    // For "All", cap each category independently then apply the overall ceiling
-    // so high-volume categories can't crowd out low-volume ones.
+    // Cap events. Non-sports categories are capped to their per-category limit.
+    // Sports are capped two ways: each sport to its per-sport limit, and the
+    // Sports category as a whole to its category limit. A specific sport view
+    // is capped only to that sport's limit. "All" applies the overall ceiling.
     let capped: EventSummary[];
-    if (category && category !== "All") {
-      capped = withFree.slice(0, limitForCategory(settings, category));
+    if (category === "Sports" && sub) {
+      capped = withFree.slice(0, limitForSport(settings, sub));
     } else {
-      const counts = new Map<string, number>();
+      const catCounts = new Map<string, number>();
+      const sportCapCounts = new Map<string, number>();
       capped = [];
       for (const e of withFree) {
-        const used = counts.get(e.category) ?? 0;
-        if (used >= limitForCategory(settings, e.category)) continue;
-        counts.set(e.category, used + 1);
-        capped.push(e);
+        if (e.category === "Sports") {
+          const sport = sportOf(e);
+          if ((sportCapCounts.get(sport) ?? 0) >= limitForSport(settings, sport)) continue;
+          if ((catCounts.get("Sports") ?? 0) >= limitForCategory(settings, "Sports"))
+            continue;
+          sportCapCounts.set(sport, (sportCapCounts.get(sport) ?? 0) + 1);
+          catCounts.set("Sports", (catCounts.get("Sports") ?? 0) + 1);
+          capped.push(e);
+        } else {
+          if ((catCounts.get(e.category) ?? 0) >= limitForCategory(settings, e.category))
+            continue;
+          catCounts.set(e.category, (catCounts.get(e.category) ?? 0) + 1);
+          capped.push(e);
+        }
       }
       capped = capped.slice(0, settings.maxLiveEvents);
     }
@@ -87,6 +161,10 @@ export async function GET(req: Request) {
     return NextResponse.json({
       events: capped,
       categories,
+      sports,
+      sportCounts,
+      leagues,
+      leagueCounts,
       total: withFree.length,
       fetchedAt: new Date().toISOString(),
     });
