@@ -15,7 +15,10 @@ import {
   predictionJsonSchema,
 } from "./schema";
 
-const MAX_MARKETS_FOR_MODEL = 15;
+// High enough to cover large multi-outcome events (e.g. World Cup ~48
+// countries) so every option reaches the model. Only the price-history
+// (candles) detail is limited to the most-traded markets below.
+const MAX_MARKETS_FOR_MODEL = 100;
 const MAX_MARKETS_WITH_CANDLES = 8;
 const MAX_PAUSE_CONTINUATIONS = 8;
 

@@ -1,9 +1,10 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ExternalLink } from "lucide-react";
 import type { EventSummary, Market } from "@/lib/kalshi/types";
 import { categoryColor } from "@/lib/kalshi/categories";
-import { daysUntil, formatPct, formatVolume, kalshiEventUrl } from "@/lib/utils";
+import { cn, daysUntil, formatPct, formatVolume, kalshiEventUrl } from "@/lib/utils";
 import { PredictionModal } from "@/components/PredictionModal";
 
 function multiplier(prob: number | null): string {
@@ -37,9 +38,13 @@ export function EventCard({
   readOnly?: boolean;
 }) {
   const color = categoryColor(event.category);
-  const topMarkets = [...event.markets]
-    .sort((a, b) => b.volume - a.volume)
-    .slice(0, 3);
+  const [expanded, setExpanded] = useState(false);
+  const sortedMarkets = [...event.markets].sort((a, b) => b.volume - a.volume);
+  const COLLAPSED_COUNT = 3;
+  const hasMore = sortedMarkets.length > COLLAPSED_COUNT;
+  const visibleMarkets = expanded
+    ? sortedMarkets
+    : sortedMarkets.slice(0, COLLAPSED_COUNT);
   const d = daysUntil(event.closeTime);
 
   return (
@@ -75,10 +80,29 @@ export function EventCard({
       </h3>
 
       <div className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
-        {topMarkets.map((m) => (
+        {visibleMarkets.map((m) => (
           <OutcomeRow key={m.ticker} market={m} />
         ))}
       </div>
+
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="mt-2 inline-flex items-center gap-1 self-start text-xs font-medium text-emerald-600 transition-colors hover:text-emerald-700"
+        >
+          {expanded
+            ? "Show less"
+            : `more (${sortedMarkets.length - COLLAPSED_COUNT})`}
+          <ChevronDown
+            className={cn(
+              "h-3.5 w-3.5 transition-transform",
+              expanded && "rotate-180"
+            )}
+          />
+        </button>
+      )}
 
       <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
         <div className="text-xs text-slate-400">
