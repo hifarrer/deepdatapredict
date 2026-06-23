@@ -366,10 +366,11 @@ export function startOfTodayEastern(now: Date = new Date()): number {
  * preserved, with each match's events pulled together at the position of its
  * strongest member.
  *
- * With `mainsFirst`, every match's main event is lifted above all the prop
- * sub-events, so the list reads as a clean run of the actual matches first and
- * then the props (grouped per match) underneath — rather than each match's props
- * sandwiched between it and the next match. Both tiers keep the match order above.
+ * With `mainsFirst`, the match prop sub-events are lifted below everything else,
+ * so the list reads as a clean run of the actual matches (and, in a mixed list,
+ * the non-sports events) first, then the props grouped per match underneath —
+ * rather than each match's props sandwiched between it and the next match. Only
+ * Sports props sink; both tiers keep the match order above.
  */
 export function orderByMatch(
   events: EventSummary[],
@@ -449,13 +450,17 @@ export function orderByMatch(
   const orderedGroups = keys.map((k) => groups.get(k)!);
   if (!mainsFirst) return orderedGroups.flat();
 
-  // Two tiers: every match's main event first (in match order), then all the prop
-  // sub-events (still grouped per match, in the same match order) underneath.
+  // Two tiers: main events first (in match order), then the prop sub-events
+  // (still grouped per match, in the same order) underneath. Only Sports props
+  // drop to the lower tier — non-sports events (whose titles can carry a ":" for
+  // unrelated reasons) and the match itself always stay in the top tier, so a
+  // mixed list like "All" keeps its other events up top and just sinks the props.
   const mains: EventSummary[] = [];
   const subs: EventSummary[] = [];
   for (const list of orderedGroups) {
     for (const e of list) {
-      (isMainMatchEvent(e.title) ? mains : subs).push(e);
+      const isSportsProp = e.category === "Sports" && !isMainMatchEvent(e.title);
+      (isSportsProp ? subs : mains).push(e);
     }
   }
   return [...mains, ...subs];
