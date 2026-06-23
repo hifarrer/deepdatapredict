@@ -334,6 +334,26 @@ export function matchDateFromTicker(eventTicker: string | undefined): number | n
 }
 
 /**
+ * UTC-midnight ms of *today's* date in US Eastern time. Kalshi (a US exchange)
+ * labels game tickers by their Eastern calendar date, so "today" must be the ET
+ * date — otherwise a 10pm-ET match flips to "past" the moment UTC ticks midnight
+ * (i.e. 8pm ET), sinking tonight's games. Matches the encoding of
+ * {@link matchDateFromTicker} so the two are directly comparable.
+ */
+export function startOfTodayEastern(now: Date = new Date()): number {
+  const [month, day, year] = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(now)
+    .split("/")
+    .map(Number);
+  return Date.UTC(year, month - 1, day);
+}
+
+/**
  * Re-order events so each match's events sit together with the main match event
  * first and its prop sub-events (Goalscorer, Total Goals, Spread, …) after it,
  * the way Kalshi's league pages group them. Only Sports events are grouped;
@@ -345,10 +365,18 @@ export function matchDateFromTicker(eventTicker: string | undefined): number | n
  * already-played matches sink to the bottom. Otherwise the incoming order is
  * preserved, with each match's events pulled together at the position of its
  * strongest member.
+ *
+ * With `mainsFirst`, every match's main event is lifted above all the prop
+ * sub-events, so the list reads as a clean run of the actual matches first and
+ * then the props (grouped per match) underneath — rather than each match's props
+ * sandwiched between it and the next match. Both tiers keep the match order above.
  */
 export function orderByMatch(
   events: EventSummary[],
-  { byKickoff = false }: { byKickoff?: boolean } = {}
+  {
+    byKickoff = false,
+    mainsFirst = false,
+  }: { byKickoff?: boolean; mainsFirst?: boolean } = {}
 ): EventSummary[] {
   const groups = new Map<string, EventSummary[]>();
   const firstIndex = new Map<string, number>();
@@ -391,13 +419,9 @@ export function orderByMatch(
     volByKey.set(key, vol);
   }
 
-  // Day boundary for "today": a match earlier today is still live/today, not past.
-  const nowDate = new Date();
-  const startOfToday = Date.UTC(
-    nowDate.getUTCFullYear(),
-    nowDate.getUTCMonth(),
-    nowDate.getUTCDate()
-  );
+  // Day boundary for "today" (Eastern, to match Kalshi's ticker dates): a match
+  // earlier today is still live/today, not past.
+  const startOfToday = startOfTodayEastern();
 
   // Bucket: 0 = today/upcoming dated match, 1 = undated tournament future,
   // 2 = already-played match. Lower buckets lead.
@@ -422,5 +446,17 @@ export function orderByMatch(
     return firstIndex.get(a)! - firstIndex.get(b)!;
   });
 
-  return keys.flatMap((k) => groups.get(k)!);
+  const orderedGroups = keys.map((k) => groups.get(k)!);
+  if (!mainsFirst) return orderedGroups.flat();
+
+  // Two tiers: every match's main event first (in match order), then all the prop
+  // sub-events (still grouped per match, in the same match order) underneath.
+  const mains: EventSummary[] = [];
+  const subs: EventSummary[] = [];
+  for (const list of orderedGroups) {
+    for (const e of list) {
+      (isMainMatchEvent(e.title) ? mains : subs).push(e);
+    }
+  }
+  return [...mains, ...subs];
 }

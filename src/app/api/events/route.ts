@@ -145,10 +145,13 @@ export async function GET(req: Request) {
     // Group every match's events together with the main match event first, so a
     // match's prop markets (Goalscorer, Total Goals, Spread…) never appear ahead
     // of the match itself. Under the Sports tab (incl. a selected sport/league),
-    // also order the matches by kickoff — live/soonest first — the way Kalshi's
-    // league pages do.
+    // also order the matches by kickoff — today's first — and lift every match
+    // above its props so the list reads as the actual games first, then the
+    // props underneath, the way Kalshi's league pages do.
+    const isSportsView = category === "Sports";
     const ordered = orderByMatch(withFree, {
-      byKickoff: category === "Sports",
+      byKickoff: isSportsView,
+      mainsFirst: isSportsView,
     });
 
     // Cap events. Non-sports categories are capped to their per-category limit.
