@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronDown, ExternalLink } from "lucide-react";
 import type { EventSummary, Market } from "@/lib/kalshi/types";
 import { categoryColor } from "@/lib/kalshi/categories";
+import { flagUrl, splitMatchup } from "@/lib/kalshi/flags";
 import { cn, daysUntil, formatPct, formatVolume, kalshiEventUrl } from "@/lib/utils";
 import { PredictionModal } from "@/components/PredictionModal";
 
@@ -13,12 +14,36 @@ function multiplier(prob: number | null): string {
   return `${m.toFixed(m >= 10 ? 1 : 2)}x`;
 }
 
-function OutcomeRow({ market }: { market: Market }) {
+/**
+ * Small flag for a national team, or null when the name isn't a known country.
+ * Retina-served via flagcdn's wider PNG; alt is empty since the country name sits
+ * right beside it.
+ */
+function CountryFlag({ country, className }: { country: string; className?: string }) {
+  const src = flagUrl(country, 40);
+  if (!src) return null;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- tiny external flag CDN asset
+    <img
+      src={src}
+      srcSet={`${src} 1x, ${flagUrl(country, 80)} 2x`}
+      alt=""
+      loading="lazy"
+      className={cn(
+        "h-3.5 w-[1.25rem] shrink-0 rounded-[2px] object-cover shadow-sm ring-1 ring-slate-900/10",
+        className
+      )}
+    />
+  );
+}
+
+function OutcomeRow({ market, showFlag = false }: { market: Market; showFlag?: boolean }) {
   const prob = market.lastProbability;
   return (
     <div className="flex items-center justify-between gap-3 py-2">
-      <span className="min-w-0 flex-1 truncate text-sm text-slate-700">
-        {market.title}
+      <span className="flex min-w-0 flex-1 items-center gap-2 text-sm text-slate-700">
+        {showFlag && <CountryFlag country={market.title} />}
+        <span className="truncate">{market.title}</span>
       </span>
       <div className="flex items-center gap-3">
         <span className="text-xs tabular-nums text-slate-400">{multiplier(prob)}</span>
@@ -41,6 +66,9 @@ export function EventCard({
   authenticated?: boolean;
 }) {
   const color = categoryColor(event.category);
+  const isWorldCup = event.category === "Sports" && event.league === "World Cup";
+  // Flag the two teams in a head-to-head World Cup matchup title ("France vs Iraq").
+  const matchup = isWorldCup ? splitMatchup(event.title) : null;
   const [expanded, setExpanded] = useState(false);
   const sortedMarkets = [...event.markets].sort((a, b) => b.volume - a.volume);
   const COLLAPSED_COUNT = 3;
@@ -68,6 +96,12 @@ export function EventCard({
       </div>
 
       <h3 className="line-clamp-2 min-h-[2.75rem] text-base font-semibold text-slate-900">
+        {matchup && (
+          <span className="mr-1.5 inline-flex translate-y-0.5 items-center gap-1">
+            <CountryFlag country={matchup[0]} />
+            <CountryFlag country={matchup[1]} />
+          </span>
+        )}
         {event.title}
         <a
           href={kalshiEventUrl(event.eventTicker, event.seriesTicker)}
@@ -84,7 +118,7 @@ export function EventCard({
 
       <div className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
         {visibleMarkets.map((m) => (
-          <OutcomeRow key={m.ticker} market={m} />
+          <OutcomeRow key={m.ticker} market={m} showFlag={isWorldCup} />
         ))}
       </div>
 
