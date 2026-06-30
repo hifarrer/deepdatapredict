@@ -15,6 +15,8 @@ const schema = z.object({
     .string()
     .default("https://api.elections.kalshi.com/trade-api/v2"),
   PREDICTION_MODEL: z.string().default("claude-opus-4-8"),
+  // Cheaper model used for the Easy Predictions screening pass (no web search).
+  EASY_SCREEN_MODEL: z.string().default("claude-haiku-4-5-20251001"),
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
@@ -28,6 +30,7 @@ const parsed = schema.parse({
   NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
   KALSHI_API_BASE: process.env.KALSHI_API_BASE,
   PREDICTION_MODEL: process.env.PREDICTION_MODEL,
+  EASY_SCREEN_MODEL: process.env.EASY_SCREEN_MODEL,
   NODE_ENV: process.env.NODE_ENV,
 });
 
@@ -36,6 +39,7 @@ export const env = parsed;
 /** Stable, public config (always safe to read). */
 export const KALSHI_API_BASE = parsed.KALSHI_API_BASE.replace(/\/+$/, "");
 export const PREDICTION_MODEL = parsed.PREDICTION_MODEL;
+export const EASY_SCREEN_MODEL = parsed.EASY_SCREEN_MODEL;
 export const IS_PROD = parsed.NODE_ENV === "production";
 
 /** Public site origin used for canonical URLs, sitemap, robots, OG tags. */

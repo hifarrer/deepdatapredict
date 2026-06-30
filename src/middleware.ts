@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/jwt";
 
-const PROTECTED = ["/dashboard", "/history", "/admin"];
+const PROTECTED = ["/dashboard", "/easy-predictions", "/history", "/admin"];
 const AUTH_PAGES = ["/login", "/register"];
 
 export async function middleware(req: NextRequest) {
@@ -43,6 +43,7 @@ export async function middleware(req: NextRequest) {
 export const config = {
   matcher: [
     "/dashboard/:path*",
+    "/easy-predictions/:path*",
     "/history/:path*",
     "/admin/:path*",
     "/login",

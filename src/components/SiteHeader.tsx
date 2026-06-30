@@ -27,6 +27,11 @@ export async function SiteHeader() {
               </Link>
             )}
             {session && (
+              <Link href="/easy-predictions" className="hover:text-slate-900">
+                Easy Predictions
+              </Link>
+            )}
+            {session && (
               <Link href="/history" className="hover:text-slate-900">
                 History
               </Link>

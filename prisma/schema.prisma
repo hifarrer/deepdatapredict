@@ -104,3 +104,14 @@ model EventSnapshot {
   count      Int      @default(0)
   fetchedAt  DateTime @default(now())
 }
+
+// Curated "Easy Predictions": the top events an AI screening pass judged most
+// forecastable from public information, each with a quick per-outcome AI
+// probability estimate. Refreshed by /api/cron/easy-predictions. Singleton row,
+// mirroring EventSnapshot. `picks` holds EasyPick[] (see src/lib/ai/easy.ts).
+model EasyPicksSnapshot {
+  id        String   @id @default("live") // singleton row
+  picks     Json // EasyPick[]
+  count     Int      @default(0)
+  fetchedAt DateTime @default(now())
+}
