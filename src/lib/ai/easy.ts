@@ -25,9 +25,11 @@ export interface EasyPick {
 const PICK_COUNT = 20;
 const SCREEN_BATCH = 80; // events per screening call (keeps the prompt bounded)
 const MAX_OUTCOMES = 8; // outcomes shown/estimated per event
-const ESTIMATE_CONCURRENCY = 3; // picks researched in parallel
-const ESTIMATE_DELAY_MS = 300; // throttle between concurrency batches
-const MAX_PAUSE_CONTINUATIONS = 4;
+// Picks are researched in parallel to keep the whole background run to a few
+// minutes (each light estimate is ~40s, dominated by web-search round trips).
+const ESTIMATE_CONCURRENCY = 6;
+const ESTIMATE_DELAY_MS = 100; // small spacing between batches to ease rate limits
+const MAX_PAUSE_CONTINUATIONS = 3;
 
 // ---- Small helpers (kept local; mirrors the patterns in predict.ts) ----
 
@@ -248,7 +250,7 @@ export async function estimatePick(event: EventSummary): Promise<EasyOutcome[]> 
     while (true) {
       const stream = client.messages.stream({
         model: PREDICTION_MODEL,
-        max_tokens: 4000,
+        max_tokens: 2500,
         output_config: { effort: "low" },
         system: researchSystemPrompt(todayIso),
         tools: [{ type: "web_search_20260209", name: "web_search" }],
