@@ -1,4 +1,4 @@
-import { EASY_SCREEN_MODEL, PREDICTION_MODEL } from "@/lib/env";
+import { EASY_SCREEN_MODEL } from "@/lib/env";
 import type { EventSummary, Market } from "@/lib/kalshi/types";
 import { anthropic } from "./anthropic";
 
@@ -18,18 +18,37 @@ export interface EasyPick {
   predictability: number; // 0-100 screening score
   reason: string; // one-line "why this is forecastable"
   outcomes: EasyOutcome[];
+  /** ISO timestamp of when the AI estimate was produced (for incremental reuse). */
+  estimatedAt: string;
 }
 
 // ---- Tunables ----
 
 const PICK_COUNT = 20;
 const SCREEN_BATCH = 80; // events per screening call (keeps the prompt bounded)
+// Cap how many (most-liquid) events get screened. Caps screening tokens and
+// focuses picks on liquid events, which also carry more public information.
+const SCREEN_CANDIDATE_CAP = 120;
 const MAX_OUTCOMES = 8; // outcomes shown/estimated per event
 // Picks are researched in parallel to keep the whole background run to a few
 // minutes (each light estimate is ~40s, dominated by web-search round trips).
 const ESTIMATE_CONCURRENCY = 6;
 const ESTIMATE_DELAY_MS = 100; // small spacing between batches to ease rate limits
-const MAX_PAUSE_CONTINUATIONS = 3;
+const MAX_PAUSE_CONTINUATIONS = 2;
+
+// Phase-2 research uses Sonnet (hardcoded) — far cheaper than the Opus deep
+// pipeline while still a strong forecaster for a quick estimate. The on-demand
+// "Generate prediction" flow keeps using PREDICTION_MODEL (Opus) from .env.
+const EASY_RESEARCH_MODEL = "claude-sonnet-4-6";
+// Cap the number of web searches per pick — bounds the biggest token sink
+// (fetched page content enters context per search). The web_search_20260209
+// tool accepts max_uses but not max_content_tokens.
+const WEB_SEARCH_MAX_USES = 3;
+
+// Incremental reuse: skip re-researching a pick whose estimate is still fresh
+// and whose Kalshi price hasn't meaningfully moved since it was estimated.
+const REUSE_MAX_AGE_HOURS = 24;
+const REUSE_MOVE_THRESHOLD_PTS = 6;
 
 // ---- Small helpers (kept local; mirrors the patterns in predict.ts) ----
 
@@ -249,11 +268,17 @@ export async function estimatePick(event: EventSummary): Promise<EasyOutcome[]> 
   try {
     while (true) {
       const stream = client.messages.stream({
-        model: PREDICTION_MODEL,
+        model: EASY_RESEARCH_MODEL,
         max_tokens: 2500,
         output_config: { effort: "low" },
         system: researchSystemPrompt(todayIso),
-        tools: [{ type: "web_search_20260209", name: "web_search" }],
+        tools: [
+          {
+            type: "web_search_20260209",
+            name: "web_search",
+            max_uses: WEB_SEARCH_MAX_USES,
+          },
+        ],
         messages,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
@@ -312,12 +337,66 @@ export async function estimatePick(event: EventSummary): Promise<EasyOutcome[]> 
   });
 }
 
+// ---- Incremental reuse helpers ----
+
+function isFresh(estimatedAt: string | undefined): boolean {
+  if (!estimatedAt) return false;
+  const t = new Date(estimatedAt).getTime();
+  if (Number.isNaN(t)) return false;
+  return Date.now() - t < REUSE_MAX_AGE_HOURS * 3_600_000;
+}
+
+function hasAiEstimate(prior: EasyPick): boolean {
+  return prior.outcomes.some((o) => o.aiProb != null);
+}
+
+/** True if the current top outcomes diverge from the prior-priced ones enough
+ *  to warrant a fresh estimate (a new top outcome, or a price move ≥ threshold). */
+function kalshiMoved(prior: EasyPick, event: EventSummary): boolean {
+  const priorKalshi = new Map(prior.outcomes.map((o) => [o.ticker, o.kalshiProb]));
+  for (const m of topOutcomes(event)) {
+    const before = priorKalshi.get(m.ticker);
+    if (before == null) return true; // a new outcome entered the top set
+    if (Math.abs((m.lastProbability as number) - before) >= REUSE_MOVE_THRESHOLD_PTS) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Carry the prior AI estimate forward onto the current markets, recomputing
+ *  edge against the (current) Kalshi price. */
+function reusableOutcomes(prior: EasyPick, event: EventSummary): EasyOutcome[] {
+  const priorAi = new Map(prior.outcomes.map((o) => [o.ticker, o.aiProb]));
+  return topOutcomes(event).map((m) => {
+    const kalshiProb = m.lastProbability;
+    const aiProb = priorAi.get(m.ticker) ?? null;
+    return {
+      ticker: m.ticker,
+      title: m.title,
+      kalshiProb,
+      aiProb,
+      edge: aiProb != null && kalshiProb != null ? aiProb - kalshiProb : null,
+    };
+  });
+}
+
 // ---- Orchestration ----
 
-/** Screen all events, pick the top N, and attach quick AI estimates. */
-export async function buildEasyPicks(events: EventSummary[]): Promise<EasyPick[]> {
-  // Only consider live events that have at least one analyzable outcome.
-  const candidates = events.filter((e) => e.isLive && topOutcomes(e, 1).length > 0);
+/**
+ * Screen events, pick the top N, and attach quick AI estimates. Picks whose
+ * prior estimate is still fresh and whose Kalshi price hasn't moved are reused
+ * from `priorPicks` (no API call); only new/stale/moved picks are re-researched.
+ */
+export async function buildEasyPicks(
+  events: EventSummary[],
+  priorPicks: EasyPick[] = []
+): Promise<EasyPick[]> {
+  // Only the most liquid live events with an analyzable outcome are screened.
+  const candidates = events
+    .filter((e) => e.isLive && topOutcomes(e, 1).length > 0)
+    .sort((a, b) => b.totalVolume - a.totalVolume)
+    .slice(0, SCREEN_CANDIDATE_CAP);
   if (candidates.length === 0) return [];
 
   const scores = await screenEvents(candidates);
@@ -330,22 +409,48 @@ export async function buildEasyPicks(events: EventSummary[]): Promise<EasyPick[]
     .sort((a, b) => b.score.predictability - a.score.predictability)
     .slice(0, PICK_COUNT);
 
-  // Estimate per-outcome AI probabilities with bounded concurrency.
-  const picks: EasyPick[] = [];
-  for (let i = 0; i < ranked.length; i += ESTIMATE_CONCURRENCY) {
-    const slice = ranked.slice(i, i + ESTIMATE_CONCURRENCY);
-    const outcomes = await Promise.all(slice.map((r) => estimatePick(r.event)));
-    slice.forEach((r, j) => {
-      picks.push({
+  const priorByTicker = new Map(priorPicks.map((p) => [p.event.eventTicker, p]));
+  const nowIso = new Date().toISOString();
+
+  // Reused picks are filled inline; the rest are queued for research, preserving
+  // the ranked order in the final array.
+  const result: EasyPick[] = new Array(ranked.length);
+  const toResearch: { idx: number; event: EventSummary; score: ScreenScore }[] = [];
+
+  ranked.forEach((r, idx) => {
+    const prior = priorByTicker.get(r.event.eventTicker);
+    const canReuse =
+      prior && isFresh(prior.estimatedAt) && hasAiEstimate(prior) && !kalshiMoved(prior, r.event);
+    if (canReuse && prior) {
+      result[idx] = {
         event: r.event,
         predictability: Math.round(r.score.predictability),
         reason: r.score.reason,
+        outcomes: reusableOutcomes(prior, r.event),
+        estimatedAt: prior.estimatedAt,
+      };
+    } else {
+      toResearch.push({ idx, event: r.event, score: r.score });
+    }
+  });
+
+  // Research only the picks that need it, with bounded concurrency.
+  for (let i = 0; i < toResearch.length; i += ESTIMATE_CONCURRENCY) {
+    const slice = toResearch.slice(i, i + ESTIMATE_CONCURRENCY);
+    const outcomes = await Promise.all(slice.map((s) => estimatePick(s.event)));
+    slice.forEach((s, j) => {
+      result[s.idx] = {
+        event: s.event,
+        predictability: Math.round(s.score.predictability),
+        reason: s.score.reason,
         outcomes: outcomes[j],
-      });
+        estimatedAt: nowIso,
+      };
     });
-    if (i + ESTIMATE_CONCURRENCY < ranked.length) {
+    if (i + ESTIMATE_CONCURRENCY < toResearch.length) {
       await new Promise((res) => setTimeout(res, ESTIMATE_DELAY_MS));
     }
   }
-  return picks;
+
+  return result;
 }

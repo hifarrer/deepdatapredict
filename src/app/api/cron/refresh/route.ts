@@ -28,6 +28,13 @@ const FEED_PAGE_DELAY_MS = 250;
 const SWEEP_SERIES_LIMIT = 50;
 const SWEEP_DELAY_MS = 200;
 
+// Kalshi's global feed is not grouped or balanced by category. Mentions events
+// currently appear much deeper than the categories at the front of the feed,
+// after the snapshot's overall limit would normally be full. Reserve that
+// category's configured capacity and keep paging until it has had a chance to
+// fill it.
+const RESERVED_LATE_FEED_CATEGORIES = new Set(["Mentions"]);
+
 /**
  * Refresh the cached snapshot of live Kalshi events. Meant to be called on a
  * schedule (Vercel Cron or an external scheduler) so page loads read the cached
@@ -59,6 +66,17 @@ async function handle(req: Request) {
     // the uncapped World Cup import never crowds the other categories out.
     let cappedCount = 0;
 
+    function remainingReservedSlots(): number {
+      let remaining = 0;
+      for (const category of RESERVED_LATE_FEED_CATEGORIES) {
+        remaining += Math.max(
+          0,
+          limitForCategory(settings, category) - (catCount.get(category) ?? 0)
+        );
+      }
+      return Math.min(remaining, settings.maxLiveEvents);
+    }
+
     function tryAdd(e: EventSummary): boolean {
       if (!e.isLive || kept.has(e.eventTicker)) return false;
 
@@ -69,8 +87,15 @@ async function handle(req: Request) {
         return true;
       }
 
-      if (cappedCount >= settings.maxLiveEvents) return false;
       if ((catCount.get(e.category) ?? 0) >= limitForCategory(settings, e.category)) {
+        return false;
+      }
+      const isReservedCategory = RESERVED_LATE_FEED_CATEGORIES.has(e.category);
+      const generalCapacity = settings.maxLiveEvents - remainingReservedSlots();
+      if (
+        cappedCount >= settings.maxLiveEvents ||
+        (!isReservedCategory && cappedCount >= generalCapacity)
+      ) {
         return false;
       }
       const sport = e.category === "Sports" ? e.subCategory ?? "Other" : null;
@@ -116,14 +141,20 @@ async function handle(req: Request) {
 
     // 2) Balanced global feed for non-sports categories (and any remaining
     //    sports budget). Paged with a throttle; stops on feed exhaustion, the
-    //    overall ceiling, or the page ceiling.
+    //    overall ceiling once reserved late categories are filled, or the page
+    //    ceiling.
     let cursor: string | undefined;
     let pages = 0;
     for (; pages < FEED_PAGE_CEILING; pages++) {
       const res = await pageOpenEvents(cursor, 200);
       for (const e of res.events) tryAdd(e);
       cursor = res.cursor;
-      if (!cursor || kept.size >= settings.maxLiveEvents) break;
+      if (
+        !cursor ||
+        (cappedCount >= settings.maxLiveEvents && remainingReservedSlots() === 0)
+      ) {
+        break;
+      }
       await sleep(FEED_PAGE_DELAY_MS);
     }
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCachedLiveEvents } from "@/lib/kalshi/cache";
-import { buildEasyPicks } from "@/lib/ai/easy";
+import { buildEasyPicks, type EasyPick } from "@/lib/ai/easy";
 import { isAuthorizedCron } from "@/lib/env";
 
 export const runtime = "nodejs";
@@ -37,7 +37,10 @@ async function runRefresh() {
   lastError = null;
   try {
     const events = await getCachedLiveEvents();
-    const picks = await buildEasyPicks(events);
+    // Pass the prior snapshot so unchanged picks are reused (no re-research).
+    const prior = await prisma.easyPicksSnapshot.findUnique({ where: { id: "live" } });
+    const priorPicks = (prior?.picks as EasyPick[] | undefined) ?? [];
+    const picks = await buildEasyPicks(events, priorPicks);
     await prisma.easyPicksSnapshot.upsert({
       where: { id: "live" },
       update: { picks: picks as never, count: picks.length, fetchedAt: new Date() },

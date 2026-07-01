@@ -26,6 +26,7 @@ export const CATEGORY_ORDER = [
   "Health",
   "Companies",
   "Entertainment",
+  "Mentions",
 ];
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -44,6 +45,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   Health: "#e11d48",
   Companies: "#475569",
   Entertainment: "#9333ea",
+  Mentions: "#ea580c",
   [PAST_EVENTS_CATEGORY]: "#64748b",
   Other: "#64748b",
 };
