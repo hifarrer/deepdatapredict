@@ -26,6 +26,11 @@ export async function getCachedLiveEvents(): Promise<EventSummary[]> {
   inflight = loadSnapshot()
     .then((events) => {
       cache = { at: Date.now(), events };
+      // Drop the parsed snapshot once stale so an idle server doesn't pin it in
+      // memory forever. unref() so this timer never keeps the process busy.
+      setTimeout(() => {
+        if (cache && Date.now() - cache.at >= TTL_MS) cache = null;
+      }, TTL_MS).unref();
       return events;
     })
     .finally(() => {
